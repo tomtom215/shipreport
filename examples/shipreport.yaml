@@ -1,0 +1,41 @@
+github:
+  # Point at GitHub Enterprise Server if you're self-hosted.
+  baseUrl: https://api.github.com
+  graphqlUrl: https://api.github.com/graphql
+  # shipreport reads the token from this env var. It is never read from this file.
+  tokenEnv: SHIPREPORT_GITHUB_TOKEN
+
+org: acme-eng
+repos:
+  - acme-eng/checkout-service
+  - acme-eng/billing-api
+  - acme-eng/web-app
+
+# Either a "YYYYQn" label or an explicit date range.
+quarter: 2026Q1
+# quarter:
+#   from: 2026-01-01
+#   to: 2026-03-31
+
+timezone: America/New_York
+
+team:
+  manager: jdoe
+  members: [asmith, blee, cwong]
+
+classification:
+  bugfixLabels: [bug, hotfix, p0, p1]
+  featureLabels: [feature, enhancement]
+  infraLabels: [ci, build, devops, infra]
+  docsLabels: [docs, documentation]
+
+output:
+  dir: ./out/2026Q1
+  formats: [md, html]       # add "pdf" to enable puppeteer output
+  perDev: true
+  teamSummary: true
+  managerRollup: true
+
+cache:
+  path: ~/.cache/shipreport/cache.sqlite
+  ttlDays: 7

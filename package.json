@@ -1,0 +1,58 @@
+{
+  "name": "shipreport",
+  "version": "0.1.0",
+  "description": "Quarterly engineering success story generator — point it at a GitHub org, pick a quarter, get draft success stories per developer plus a team highlight reel.",
+  "type": "module",
+  "bin": {
+    "shipreport": "bin/shipreport.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src/templates",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/copy-templates.js",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier -w ."
+  },
+  "dependencies": {
+    "@octokit/graphql": "^8.1.1",
+    "@octokit/plugin-retry": "^7.1.2",
+    "@octokit/plugin-throttling": "^9.3.2",
+    "@octokit/rest": "^21.0.2",
+    "citty": "^0.1.6",
+    "eta": "^3.5.0",
+    "markdown-it": "^14.1.0",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.7.5",
+    "eslint": "^9.12.0",
+    "nock": "^13.5.5",
+    "prettier": "^3.3.3",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.8.1",
+    "vitest": "^2.1.2"
+  },
+  "optionalDependencies": {
+    "puppeteer": "^23.5.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tomtom215/shipreport"
+  }
+}
