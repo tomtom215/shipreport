@@ -26,11 +26,10 @@ export function makeClient(opts: GithubOptions): GithubClient {
   const rest = new ShipOctokit({
     auth: opts.token,
     baseUrl: opts.baseUrl,
-    userAgent: opts.userAgent ?? "shipreport/0.1",
+    userAgent: opts.userAgent ?? "shipreport/0.2",
     throttle: {
       onRateLimit: (retryAfter: number, info, _oct, retryCount: number) => {
         log(`rate limit hit on ${info.method} ${info.url}; sleeping ${retryAfter}s`);
-        // Retry up to 3 times, then give up gracefully.
         return retryCount < 3;
       },
       onSecondaryRateLimit: (retryAfter: number, info, _oct, retryCount: number) => {
@@ -45,7 +44,7 @@ export function makeClient(opts: GithubOptions): GithubClient {
     baseUrl: opts.graphqlUrl.replace(/\/graphql$/, ""),
     headers: {
       authorization: `token ${opts.token}`,
-      "user-agent": opts.userAgent ?? "shipreport/0.1",
+      "user-agent": opts.userAgent ?? "shipreport/0.2",
     },
   });
 

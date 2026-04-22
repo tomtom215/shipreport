@@ -1,5 +1,5 @@
 import { classifyPR } from "./classify.js";
-import type { Config } from "./config.js";
+import type { ClassificationConfig } from "./classify.js";
 import type {
   DevQuarter,
   IssueRef,
@@ -14,7 +14,7 @@ function emptyKinds(): Record<PRKind, number> {
   return { feature: 0, bugfix: 0, refactor: 0, docs: 0, infra: 0, other: 0 };
 }
 
-export function toPRSummary(pr: RawPR, cfg: Config["classification"]): PRSummary {
+export function toPRSummary(pr: RawPR, cfg: ClassificationConfig): PRSummary {
   const reviewers = Array.from(
     new Set(pr.reviews.filter((r) => r.user !== pr.author).map((r) => r.user)),
   );
@@ -40,7 +40,6 @@ export function toPRSummary(pr: RawPR, cfg: Config["classification"]): PRSummary
 }
 
 function rankScore(p: PRSummary): number {
-  // Deterministic highlight rank: weighted signals, ties broken by repo/number.
   return p.reviewCount * 3 + p.commentCount + p.linkedIssues.length * 2;
 }
 
@@ -51,9 +50,13 @@ function byRankThenNumber(a: PRSummary, b: PRSummary): number {
   return a.number - b.number;
 }
 
-export function aggregateDev(login: string, prs: RawPR[], cfg: Config): DevQuarter {
+export function aggregateDev(
+  login: string,
+  prs: RawPR[],
+  classification: ClassificationConfig,
+): DevQuarter {
   const authored = prs.filter((p) => p.author === login && p.mergedAt);
-  const summaries = authored.map((p) => toPRSummary(p, cfg.classification));
+  const summaries = authored.map((p) => toPRSummary(p, classification));
 
   const kinds = emptyKinds();
   let filesTouched = 0;
@@ -78,7 +81,6 @@ export function aggregateDev(login: string, prs: RawPR[], cfg: Config): DevQuart
   }
   for (const s of summaries) kinds[s.kind] += 1;
 
-  // reviewsGiven = reviews on OTHERS' PRs across the scanned repos.
   let reviewsGiven = 0;
   for (const p of prs) {
     if (p.author === login) continue;
@@ -106,14 +108,23 @@ export function aggregateDev(login: string, prs: RawPR[], cfg: Config): DevQuart
   };
 }
 
+export interface AggregateScope {
+  manager: string;
+  members: string[];
+  repos: string[];
+  classification: ClassificationConfig;
+}
+
 export function buildTeamQuarter(
-  cfg: Config,
+  scope: AggregateScope,
   quarter: QuarterRange,
   prsByRepo: Map<string, RawPR[]>,
   gaps: TeamQuarter["dataGaps"],
 ): TeamQuarter {
   const allPRs = [...prsByRepo.values()].flat();
-  const members = cfg.team.members.map((login) => aggregateDev(login, allPRs, cfg));
+  const members = scope.members.map((login) =>
+    aggregateDev(login, allPRs, scope.classification),
+  );
 
   const repoSet = new Set<string>();
   const issueSet = new Set<string>();
@@ -128,12 +139,12 @@ export function buildTeamQuarter(
 
   return {
     quarter,
-    manager: cfg.team.manager,
+    manager: scope.manager,
     members,
     totals: {
       prsMerged,
       reviewsGiven,
-      reposTouched: repoSet.size || cfg.repos.length,
+      reposTouched: repoSet.size || scope.repos.length,
       issuesClosed: issueSet.size,
     },
     dataGaps: gaps,

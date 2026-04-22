@@ -12,11 +12,112 @@ const DateRange = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
-export const ConfigSchema = z.object({
-  github: z.object({
-    baseUrl: z.string().url().default("https://api.github.com"),
-    graphqlUrl: z.string().url().default("https://api.github.com/graphql"),
-    tokenEnv: z.string().default("SHIPREPORT_GITHUB_TOKEN"),
+const Classification = z.object({
+  bugfixLabels: z.array(z.string()).default(["bug", "hotfix", "p0", "p1"]),
+  featureLabels: z.array(z.string()).default(["feature", "enhancement"]),
+  infraLabels: z.array(z.string()).default(["ci", "build", "devops", "infra"]),
+  docsLabels: z.array(z.string()).default(["docs", "documentation"]),
+});
+
+const Output = z.object({
+  dir: z.string().default("./out"),
+  formats: z.array(z.enum(["md", "html", "pdf"])).default(["md", "html"]),
+  perDev: z.boolean().default(true),
+  teamSummary: z.boolean().default(true),
+  managerRollup: z.boolean().default(true),
+});
+
+const GithubApp = z.object({
+  appId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]),
+  privateKeyEnv: z.string().optional(),
+  privateKeyPath: z.string().optional(),
+  installationId: z
+    .union([z.number().int().positive(), z.string().regex(/^\d+$/)])
+    .optional(),
+  clientId: z.string().optional(),
+});
+
+const Github = z.object({
+  baseUrl: z.string().url().default("https://api.github.com"),
+  graphqlUrl: z.string().url().default("https://api.github.com/graphql"),
+  tokenEnv: z.string().default("SHIPREPORT_GITHUB_TOKEN"),
+  app: GithubApp.optional(),
+});
+
+const Team = z.object({
+  name: z.string().min(1),
+  manager: z.string().min(1),
+  members: z.array(z.string().min(1)).min(1),
+  repos: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).min(1),
+  quarter: z.union([QuarterLabel, DateRange]).optional(),
+  schedule: z.string().optional(),
+  output: Output.partial().optional(),
+  classification: Classification.partial().optional(),
+});
+
+const Audit = z.object({
+  enabled: z.boolean().default(true),
+  path: z.string().default("~/.local/share/shipreport/state.sqlite"),
+});
+
+const Cache = z.object({
+  path: z.string().default("~/.cache/shipreport/cache.sqlite"),
+  ttlDays: z.number().int().positive().default(7),
+});
+
+// Full (new) shape.
+const MultiTeamShape = z.object({
+  github: Github.default({
+    baseUrl: "https://api.github.com",
+    graphqlUrl: "https://api.github.com/graphql",
+    tokenEnv: "SHIPREPORT_GITHUB_TOKEN",
+  }),
+  org: z.string().min(1),
+  teams: z.array(Team).min(1),
+  defaults: z
+    .object({
+      quarter: z.union([QuarterLabel, DateRange]).optional(),
+      timezone: z.string().default("UTC"),
+      output: Output.default({
+        dir: "./out",
+        formats: ["md", "html"],
+        perDev: true,
+        teamSummary: true,
+        managerRollup: true,
+      }),
+      classification: Classification.default({
+        bugfixLabels: ["bug", "hotfix", "p0", "p1"],
+        featureLabels: ["feature", "enhancement"],
+        infraLabels: ["ci", "build", "devops", "infra"],
+        docsLabels: ["docs", "documentation"],
+      }),
+    })
+    .default({
+      timezone: "UTC",
+      output: {
+        dir: "./out",
+        formats: ["md", "html"],
+        perDev: true,
+        teamSummary: true,
+        managerRollup: true,
+      },
+      classification: {
+        bugfixLabels: ["bug", "hotfix", "p0", "p1"],
+        featureLabels: ["feature", "enhancement"],
+        infraLabels: ["ci", "build", "devops", "infra"],
+        docsLabels: ["docs", "documentation"],
+      },
+    }),
+  audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
+  cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
+});
+
+// Legacy (v0.1) single-team shape — still accepted; normalized to multi-team.
+const LegacyShape = z.object({
+  github: Github.default({
+    baseUrl: "https://api.github.com",
+    graphqlUrl: "https://api.github.com/graphql",
+    tokenEnv: "SHIPREPORT_GITHUB_TOKEN",
   }),
   org: z.string().min(1),
   repos: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).min(1),
@@ -26,56 +127,86 @@ export const ConfigSchema = z.object({
     manager: z.string().min(1),
     members: z.array(z.string().min(1)).min(1),
   }),
-  classification: z
-    .object({
-      bugfixLabels: z.array(z.string()).default(["bug", "hotfix", "p0", "p1"]),
-      featureLabels: z.array(z.string()).default(["feature", "enhancement"]),
-      infraLabels: z.array(z.string()).default(["ci", "build", "devops", "infra"]),
-      docsLabels: z.array(z.string()).default(["docs", "documentation"]),
-    })
-    .default({
-      bugfixLabels: ["bug", "hotfix", "p0", "p1"],
-      featureLabels: ["feature", "enhancement"],
-      infraLabels: ["ci", "build", "devops", "infra"],
-      docsLabels: ["docs", "documentation"],
-    }),
-  output: z
-    .object({
-      dir: z.string().default("./out"),
-      formats: z.array(z.enum(["md", "html", "pdf"])).default(["md", "html"]),
-      perDev: z.boolean().default(true),
-      teamSummary: z.boolean().default(true),
-      managerRollup: z.boolean().default(true),
-    })
-    .default({
-      dir: "./out",
-      formats: ["md", "html"],
-      perDev: true,
-      teamSummary: true,
-      managerRollup: true,
-    }),
-  cache: z
-    .object({
-      path: z.string().default("~/.cache/shipreport/cache.sqlite"),
-      ttlDays: z.number().int().positive().default(7),
-    })
-    .default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
+  classification: Classification.default({
+    bugfixLabels: ["bug", "hotfix", "p0", "p1"],
+    featureLabels: ["feature", "enhancement"],
+    infraLabels: ["ci", "build", "devops", "infra"],
+    docsLabels: ["docs", "documentation"],
+  }),
+  output: Output.default({
+    dir: "./out",
+    formats: ["md", "html"],
+    perDev: true,
+    teamSummary: true,
+    managerRollup: true,
+  }),
+  audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
+  cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
 });
 
-export type Config = z.infer<typeof ConfigSchema>;
+export type Config = z.infer<typeof MultiTeamShape>;
+export type TeamConfig = z.infer<typeof Team>;
+export type AuditConfig = z.infer<typeof Audit>;
 
 export async function loadConfig(file: string): Promise<Config> {
   const raw = await readFile(file, "utf8");
   const parsed = parseYaml(raw);
-  return ConfigSchema.parse(parsed);
+  return normalize(parsed);
 }
 
-export function resolveCachePath(p: string): string {
+// Exported for tests.
+export function normalize(raw: unknown): Config {
+  // Try multi-team first; fall back to legacy.
+  const asMulti = MultiTeamShape.safeParse(raw);
+  if (asMulti.success) return asMulti.data;
+
+  const asLegacy = LegacyShape.safeParse(raw);
+  if (asLegacy.success) return legacyToMulti(asLegacy.data);
+
+  // Re-run multi-team to produce the primary error (more informative).
+  throw new Error(
+    `Invalid shipreport config:\n${asMulti.error.issues
+      .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+      .join("\n")}`,
+  );
+}
+
+function legacyToMulti(l: z.infer<typeof LegacyShape>): Config {
+  return {
+    github: l.github,
+    org: l.org,
+    teams: [
+      {
+        name: l.team.manager + "-team",
+        manager: l.team.manager,
+        members: l.team.members,
+        repos: l.repos,
+      },
+    ],
+    defaults: {
+      quarter: l.quarter,
+      timezone: l.timezone,
+      output: l.output,
+      classification: l.classification,
+    },
+    audit: l.audit,
+    cache: l.cache,
+  };
+}
+
+export function resolveHome(p: string): string {
   if (p.startsWith("~")) return path.join(homedir(), p.slice(1));
   return path.resolve(p);
 }
 
-export function resolveQuarter(q: Config["quarter"], tz: string): QuarterRange {
+// Back-compat alias.
+export const resolveCachePath = resolveHome;
+
+export function resolveQuarter(
+  q: Config["defaults"]["quarter"] | TeamConfig["quarter"],
+  tz: string,
+): QuarterRange {
+  if (!q) throw new Error("No quarter specified (team or defaults.quarter).");
   if (typeof q === "string") return quarterLabelToRange(q, tz);
   return { label: `${q.from}..${q.to}`, from: q.from, to: q.to };
 }
@@ -92,20 +223,44 @@ export function quarterLabelToRange(label: string, _tz: string): QuarterRange {
   return { label, from, to };
 }
 
-export function requireToken(cfg: Config): string {
-  const tok = process.env[cfg.github.tokenEnv];
-  if (!tok) {
-    throw new Error(
-      `GitHub token not set. Export ${cfg.github.tokenEnv} in your environment (fine-grained PAT with contents:read, issues:read, pull-requests:read, metadata:read, members:read).`,
-    );
-  }
-  return tok;
+export interface ResolvedTeam {
+  name: string;
+  manager: string;
+  members: string[];
+  repos: string[];
+  quarter: QuarterRange;
+  schedule: string | null;
+  output: z.infer<typeof Output>;
+  classification: z.infer<typeof Classification>;
 }
 
-// Redacts tokens for `shipreport config print`. Never dump the live env value.
-export function redactedConfig(cfg: Config): Config {
+export function resolveTeam(cfg: Config, team: TeamConfig): ResolvedTeam {
+  const tz = cfg.defaults.timezone;
+  const quarter = resolveQuarter(team.quarter ?? cfg.defaults.quarter, tz);
+  const output = Output.parse({ ...cfg.defaults.output, ...(team.output ?? {}) });
+  const classification = Classification.parse({
+    ...cfg.defaults.classification,
+    ...(team.classification ?? {}),
+  });
   return {
-    ...cfg,
-    github: { ...cfg.github, tokenEnv: cfg.github.tokenEnv },
+    name: team.name,
+    manager: team.manager,
+    members: team.members,
+    repos: team.repos,
+    quarter,
+    schedule: team.schedule ?? null,
+    output,
+    classification,
   };
+}
+
+export function selectTeams(cfg: Config, name: string | undefined): TeamConfig[] {
+  if (!name) return cfg.teams;
+  const matches = cfg.teams.filter((t) => t.name === name);
+  if (matches.length === 0) {
+    throw new Error(
+      `No team named "${name}". Known teams: ${cfg.teams.map((t) => t.name).join(", ")}.`,
+    );
+  }
+  return matches;
 }

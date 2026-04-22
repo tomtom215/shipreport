@@ -4,39 +4,42 @@ Quarterly engineering success story generator.
 
 Every quarter, managers spend hours stitching together commits, PRs, and reviews
 to write success stories for each report. **shipreport** does the stitching for
-them: point it at a GitHub org, pick a quarter, and it produces a draft success
-story per developer plus a team highlight reel in under a minute.
+them: point it at a GitHub org, declare your teams and their schedules, and it
+produces a draft success story per developer plus a team highlight reel in under
+a minute.
 
 Runs locally, in Docker, or as a scheduled GitHub Action. Works against
-github.com and GitHub Enterprise Server. No data leaves your network if you
-don't want it to.
+github.com and GitHub Enterprise Server. Supports both fine-grained PATs and
+GitHub App installation tokens. Ships a SOC2-oriented tamper-evident audit log.
+No data leaves your network if you don't want it to.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Install
 pnpm add -g shipreport            # or: npx shipreport
 
-# 2. Create a fine-grained PAT with:
-#    contents:read, issues:read, pull-requests:read, metadata:read, members:read
+# PAT path
 export SHIPREPORT_GITHUB_TOKEN=ghp_...
+shipreport run --config shipreport.yaml --all
 
-# 3. Point it at your org
-shipreport run --config examples/shipreport.yaml
+# GitHub App path (see examples/shipreport.yaml)
+export SHIPREPORT_APP_PRIVATE_KEY="$(cat app.pem)"
+shipreport run --config shipreport.yaml --team checkout
 ```
 
-Outputs land in `./out/<quarter>/` as Markdown + HTML (+ optional PDF):
+Outputs land in `./out/<team>/` as Markdown + HTML (+ optional PDF):
 
 ```
-out/2026Q1/
-├── asmith-2026Q1.md
-├── asmith-2026Q1.html
-├── blee-2026Q1.md
-├── ...
-├── team-summary-2026Q1.md
-└── manager-rollup-2026Q1.md
+out/
+├── checkout/
+│   ├── asmith-2026Q1.md
+│   ├── asmith-2026Q1.html
+│   ├── team-summary-checkout-2026Q1.md
+│   └── manager-rollup-checkout-2026Q1.md
+└── platform/
+    └── ...
 ```
 
 See [`examples/sample-output/`](./examples/sample-output) for what the reports
@@ -44,76 +47,141 @@ actually look like.
 
 ---
 
-## What it does (and doesn't)
-
-| In scope                                       | Out of scope                          |
-| ---------------------------------------------- | ------------------------------------- |
-| GitHub.com + GHES (REST + GraphQL v4)          | GitLab, Bitbucket, Jira               |
-| One quarter, one org, many repos               | Multi-quarter trend analysis          |
-| Markdown + HTML + optional PDF                 | Web UI, dashboards, auth, webhooks    |
-| Per-dev story + team summary + manager rollup  | Compensation / performance calibration |
-| YAML config, env-var PAT                       | GitHub App flow, OAuth, multi-tenant  |
-| Local SQLite cache (Node 22 built-in)          | Postgres / Redis / queues / schedulers |
-
-**shipreport reports `filesTouched`, not LOC.** Lines of code is a metric you'd
-game in the first week. Files touched captures scope without rewarding
-copy-paste. Numbers come straight from the GitHub API; prose is deterministic —
-a manager reviewing their team should be able to reproduce every number by hand.
-
----
-
 ## Commands
 
 ```bash
-shipreport run       --config shipreport.yaml   # generate all reports
-shipreport preview   --config shipreport.yaml --member asmith
-shipreport cache     prune --config shipreport.yaml
-shipreport doctor    --config shipreport.yaml   # probe token / GHES / puppeteer
+shipreport run --team <name>              # one team
+shipreport run --all                      # every team in the config
+shipreport run --team <name> --quarter 2026Q2   # override the quarter
+
+shipreport preview --team <name> --member asmith
+
+shipreport schedule tick                  # run every overdue team
+shipreport schedule tick --force          # run every scheduled team
+
+shipreport audit tail --limit 100         # recent audit events
+shipreport audit tail --since 2026-04-01 --json
+shipreport audit verify                   # check the hash chain
+
+shipreport cache prune
+shipreport doctor
 ```
 
-`shipreport preview` prints a single dev's story to stdout — useful when you're
-tuning classification labels.
+`shipreport preview` prints a dev's story to stdout — useful when tuning
+classification labels.
 
 ---
 
-## Config
+## Multi-team config
 
-See [`examples/shipreport.yaml`](./examples/shipreport.yaml). The token is
-**never** read from the file; shipreport reads it from the env var named in
-`github.tokenEnv` (default: `SHIPREPORT_GITHUB_TOKEN`).
+Declare every team in one file. Each team can override `quarter`, `output`, and
+`classification`; anything omitted inherits from `defaults`.
 
-Token scopes required (fine-grained PAT):
+```yaml
+org: acme-eng
+teams:
+  - name: checkout
+    manager: jdoe
+    members: [asmith, blee, cwong]
+    repos: [acme-eng/checkout-service, acme-eng/billing-api]
+    schedule: "0 14 1 1,4,7,10 *"
+  - name: platform
+    manager: kdoe
+    members: [dsmith, elee]
+    repos: [acme-eng/infra, acme-eng/ci-tooling]
+defaults:
+  quarter: 2026Q1
+  output: { dir: ./out, formats: [md, html] }
+```
 
-- `contents:read`
-- `issues:read`
-- `pull-requests:read`
-- `metadata:read`
-- `members:read`
-
-For GHES, set `github.baseUrl` to `https://ghes.yourco/api/v3` and `graphqlUrl`
-to `https://ghes.yourco/api/graphql`. A self-hosted Actions runner inside your
-network means the token never leaves.
-
----
-
-## Classification
-
-Deterministic, no LLM:
-
-1. **Labels first.** `bug`, `hotfix`, `p0`, `p1` → bugfix. `feature`,
-   `enhancement` → feature. `ci`, `build`, `devops`, `infra` → infra. `docs`,
-   `documentation` → docs. (All label lists are configurable.)
-2. **Conventional-commit title prefix.** `feat:` → feature. `fix:` → bugfix.
-   `refactor:` / `perf:` → refactor. `docs:` → docs. `ci:` / `build:` /
-   `chore:` → infra.
-3. Anything else → `other`.
-
-Labels win over titles. See `src/classify.ts` for the exact rules; see
-`tests/classify.test.ts` for the behavior guarantees.
+The legacy v0.1 single-team shape (`team: {}` + top-level `repos:`) still works
+— shipreport normalizes it to a one-entry `teams:` array on load.
 
 ---
 
-## Run in Docker
+## GitHub App auth
+
+Fine-grained PATs work fine for small orgs, but enterprise security teams often
+require GitHub Apps. Drop an `app:` block in the `github:` config:
+
+```yaml
+github:
+  app:
+    appId: 123456
+    privateKeyEnv: SHIPREPORT_APP_PRIVATE_KEY   # PEM in env (\n-escaped), or:
+    # privateKeyPath: /etc/shipreport/app.pem
+    installationId: 7890123                      # optional; auto-discovered
+```
+
+Permissions (minimum): `contents:read`, `issues:read`, `pull-requests:read`,
+`metadata:read`, `members:read`. Install the app on the org listed in `org:`.
+shipreport mints a short-lived installation token for each run — nothing
+persistent is stored.
+
+If both `app:` and `tokenEnv` are set, the App auth wins.
+
+---
+
+## Scheduler
+
+No daemon, no BullMQ, no Redis. Declare a cron expression per team, then point
+a cheap trigger (GitHub Actions hourly, OS cron, Kubernetes CronJob) at
+`shipreport schedule tick`. `tick` looks at each team's last run (stored in
+SQLite) and runs anything that has become due since then.
+
+```yaml
+teams:
+  - name: checkout
+    schedule: "0 14 1 1,4,7,10 *"   # 14:00 UTC on Jan/Apr/Jul/Oct 1st
+  - name: platform
+    schedule: "0 9 * * MON"         # NOT SUPPORTED: named days. Use 0-6.
+```
+
+Supported cron syntax: `*`, integer, `a,b,c`, `a-b`, `*/n`, `a-b/n`. Five
+fields: minute hour day-of-month month day-of-week (0=Sunday).
+
+`tick` is idempotent: if you call it twice in the same minute, it runs each
+team at most once because `last_run_at` advances past the trigger minute.
+
+Ad-hoc runs are just `shipreport run --team <name>` — they update
+`last_run_at` too, so an on-demand run suppresses the next scheduled one.
+
+---
+
+## Audit log (SOC2)
+
+Every run, every report written, every token resolution, every scheduled
+trigger appends one row to a local SQLite `audit_log` table. Rows include:
+
+- `at` — RFC3339 timestamp
+- `actor` — identity only, never a secret (e.g. `app:12345:install:67890` or
+  `pat:env:SHIPREPORT_GITHUB_TOKEN`)
+- `event` — `run_started`, `run_completed`, `report_written`, `token_resolved`,
+  `schedule_triggered`, `run_failed`, `config_loaded`, `cache_pruned`
+- `target` — org/team or file path
+- `payload` — JSON blob (caller-controlled; no secrets)
+- `prev_hash` — sha256 of the previous row's canonical form
+- `hash` — sha256 of this row's canonical form (sorted keys, no whitespace)
+
+The chain anchors at sha256 zero. `shipreport audit verify` walks the chain and
+flags any row whose hash doesn't recompute, or whose `prev_hash` doesn't match
+its predecessor. Deleting, editing, or reordering a row breaks the chain.
+
+The DB is local by default. For centralized evidence, ship the SQLite file to
+your compliance bucket on a schedule, or periodically run
+`shipreport audit tail --json` and ship the output.
+
+---
+
+## Run modes
+
+**Local:**
+
+```bash
+SHIPREPORT_GITHUB_TOKEN=ghp_... shipreport run --config shipreport.yaml --all
+```
+
+**Docker:**
 
 ```bash
 docker build -t shipreport -f docker/Dockerfile .
@@ -121,19 +189,15 @@ docker run --rm \
   -e SHIPREPORT_GITHUB_TOKEN \
   -v "$PWD/shipreport.yaml:/cfg/shipreport.yaml:ro" \
   -v "$PWD/out:/app/out" \
-  shipreport run --config /cfg/shipreport.yaml
+  -v shipreport-state:/root/.local/share/shipreport \
+  shipreport run --config /cfg/shipreport.yaml --all
 ```
 
 Add `--build-arg WITH_PDF=1` to include Chromium for PDF output.
 
----
-
-## Scheduled as a GitHub Action
-
-`.github/workflows/quarterly.yml` fires at 14:00 UTC on the first day of each
-quarter. Put your PAT in a repo secret named `SHIPREPORT_TOKEN` and the reports
-land as a run artifact. For GHES, swap to a self-hosted runner inside your
-network.
+**Scheduled GitHub Action:** `.github/workflows/quarterly.yml` runs
+`shipreport schedule tick` hourly. Any team whose cron has fired since its last
+run will run; the rest are skipped.
 
 ---
 
@@ -142,20 +206,20 @@ network.
 ```bash
 pnpm install
 pnpm typecheck
-pnpm test            # 42 tests, ~700ms
+pnpm test            # 71 tests, ~1s
 pnpm build
 ```
 
-The render tests are **golden-file tests**: the rendered Markdown is compared
-byte-for-byte against `tests/fixtures/*.md`. If you deliberately change a
-template, run `UPDATE_GOLDEN=1 pnpm test` to regenerate.
+Render tests are golden-file tests: run `UPDATE_GOLDEN=1 pnpm test` to
+regenerate `tests/fixtures/*.md` after intentional template changes.
 
 Project layout:
 
 ```
 src/
 ├── cli.ts           # citty entry point
-├── config.ts        # Zod YAML schema
+├── config.ts        # Zod YAML schema; multi-team + legacy shapes
+├── auth.ts          # GitHub App installation tokens + PAT resolution
 ├── github.ts        # Octokit (REST + GraphQL) with retry + throttling
 ├── extract.ts       # pull PRs, reviews, issues for the quarter window
 ├── classify.ts      # label + conventional-commit → PR kind
@@ -163,6 +227,10 @@ src/
 ├── narrate.ts       # deterministic prose generators
 ├── render.ts        # Eta → Markdown → HTML → optional PDF
 ├── cache.ts         # node:sqlite ETag cache (zero native deps)
+├── state.ts         # shared SQLite state DB (audit + schedule tables)
+├── audit.ts         # hash-chained append-only audit log
+├── schedule.ts      # cron parser + ScheduleStore
+├── run.ts           # per-team orchestration (auth → extract → render → audit)
 ├── types.ts
 └── templates/       # success-story, team-summary, manager-rollup
 ```

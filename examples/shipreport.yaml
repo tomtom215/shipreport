@@ -1,40 +1,66 @@
 github:
-  # Point at GitHub Enterprise Server if you're self-hosted.
   baseUrl: https://api.github.com
   graphqlUrl: https://api.github.com/graphql
-  # shipreport reads the token from this env var. It is never read from this file.
+
+  # Option A — Fine-grained PAT via env var (simple, fine for smaller orgs).
   tokenEnv: SHIPREPORT_GITHUB_TOKEN
 
+  # Option B — GitHub App (recommended for enterprise). Uncomment and supply
+  # either privateKeyEnv (PEM stuffed into an env var, \n-escaped) or
+  # privateKeyPath. installationId is optional — shipreport will look it up
+  # from the org if you omit it.
+  #
+  # app:
+  #   appId: 123456
+  #   privateKeyEnv: SHIPREPORT_APP_PRIVATE_KEY
+  #   # privateKeyPath: /etc/shipreport/app.pem
+  #   installationId: 7890123
+
 org: acme-eng
-repos:
-  - acme-eng/checkout-service
-  - acme-eng/billing-api
-  - acme-eng/web-app
 
-# Either a "YYYYQn" label or an explicit date range.
-quarter: 2026Q1
-# quarter:
-#   from: 2026-01-01
-#   to: 2026-03-31
+# One or more teams. Each team has its own members, repos, and (optionally)
+# schedule + output overrides. Scheduled runs are driven by `shipreport
+# schedule tick` — there is no daemon.
+teams:
+  - name: checkout
+    manager: jdoe
+    members: [asmith, blee, cwong]
+    repos:
+      - acme-eng/checkout-service
+      - acme-eng/billing-api
+    schedule: "0 14 1 1,4,7,10 *"   # 14:00 UTC on the 1st of Jan/Apr/Jul/Oct
 
-timezone: America/New_York
+  - name: platform
+    manager: kdoe
+    members: [dsmith, elee]
+    repos:
+      - acme-eng/infra
+      - acme-eng/ci-tooling
+    schedule: "0 14 1 1,4,7,10 *"
+    output:
+      dir: ./out/platform        # per-team override
 
-team:
-  manager: jdoe
-  members: [asmith, blee, cwong]
+# Defaults inherited by every team unless they override.
+defaults:
+  quarter: 2026Q1
+  timezone: America/New_York
+  output:
+    dir: ./out
+    formats: [md, html]         # add "pdf" to enable puppeteer
+    perDev: true
+    teamSummary: true
+    managerRollup: true
+  classification:
+    bugfixLabels: [bug, hotfix, p0, p1]
+    featureLabels: [feature, enhancement]
+    infraLabels: [ci, build, devops, infra]
+    docsLabels: [docs, documentation]
 
-classification:
-  bugfixLabels: [bug, hotfix, p0, p1]
-  featureLabels: [feature, enhancement]
-  infraLabels: [ci, build, devops, infra]
-  docsLabels: [docs, documentation]
-
-output:
-  dir: ./out/2026Q1
-  formats: [md, html]       # add "pdf" to enable puppeteer output
-  perDev: true
-  teamSummary: true
-  managerRollup: true
+# SOC2-oriented append-only audit log, hash-chained for tamper-evidence.
+# Shares a SQLite DB with the scheduler's state.
+audit:
+  enabled: true
+  path: ~/.local/share/shipreport/state.sqlite
 
 cache:
   path: ~/.cache/shipreport/cache.sqlite

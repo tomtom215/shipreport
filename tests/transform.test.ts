@@ -1,33 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { aggregateDev, buildTeamQuarter, toPRSummary } from "../src/transform.js";
-import type { Config } from "../src/config.js";
+import type { ClassificationConfig } from "../src/classify.js";
 import type { RawPR } from "../src/types.js";
 
-const cfg: Config = {
-  github: {
-    baseUrl: "https://api.github.com",
-    graphqlUrl: "https://api.github.com/graphql",
-    tokenEnv: "SHIPREPORT_GITHUB_TOKEN",
-  },
-  org: "acme",
-  repos: ["acme/svc-a", "acme/svc-b"],
-  quarter: "2026Q1",
-  timezone: "UTC",
-  team: { manager: "jdoe", members: ["alice", "bob"] },
-  classification: {
-    bugfixLabels: ["bug"],
-    featureLabels: ["feature"],
-    infraLabels: ["infra"],
-    docsLabels: ["docs"],
-  },
-  output: {
-    dir: "./out",
-    formats: ["md"],
-    perDev: true,
-    teamSummary: true,
-    managerRollup: true,
-  },
-  cache: { path: "/tmp/cache.db", ttlDays: 7 },
+const classification: ClassificationConfig = {
+  bugfixLabels: ["bug"],
+  featureLabels: ["feature"],
+  infraLabels: ["infra"],
+  docsLabels: ["docs"],
 };
 
 function pr(over: Partial<RawPR>): RawPR {
@@ -58,13 +38,13 @@ describe("toPRSummary", () => {
     const s = toPRSummary(
       pr({
         reviews: [
-          { user: "alice", state: "APPROVED" }, // self, must be excluded
+          { user: "alice", state: "APPROVED" },
           { user: "bob", state: "APPROVED" },
-          { user: "bob", state: "COMMENTED" }, // dup
+          { user: "bob", state: "COMMENTED" },
           { user: "carol", state: "CHANGES_REQUESTED" },
         ],
       }),
-      cfg.classification,
+      classification,
     );
     expect(s.reviewers.sort()).toEqual(["bob", "carol"]);
   });
@@ -74,7 +54,7 @@ describe("toPRSummary", () => {
       pr({
         linkedIssues: [{ repo: "acme/svc-a", number: 42, title: "t", url: "u", closedAt: null }],
       }),
-      cfg.classification,
+      classification,
     );
     expect(s.linkedIssues).toEqual(["acme/svc-a#42"]);
   });
@@ -83,7 +63,7 @@ describe("toPRSummary", () => {
 describe("aggregateDev", () => {
   it("only counts PRs authored by the dev", () => {
     const prs = [pr({ author: "alice" }), pr({ author: "bob", number: 2 })];
-    const d = aggregateDev("alice", prs, cfg);
+    const d = aggregateDev("alice", prs, classification);
     expect(d.prsMerged).toBe(1);
   });
 
@@ -105,7 +85,7 @@ describe("aggregateDev", () => {
         reviews: [{ user: "bob", state: "APPROVED" }],
       }),
     ];
-    const d = aggregateDev("alice", prs, cfg);
+    const d = aggregateDev("alice", prs, classification);
     expect(d.reviewsGiven).toBe(2);
   });
 
@@ -114,7 +94,7 @@ describe("aggregateDev", () => {
       pr({ author: "alice", repo: "acme/svc-a", changedFiles: 3 }),
       pr({ author: "alice", repo: "acme/svc-b", number: 2, changedFiles: 5 }),
     ];
-    const d = aggregateDev("alice", prs, cfg);
+    const d = aggregateDev("alice", prs, classification);
     expect(d.filesTouched).toBe(8);
     expect(d.crossRepoCollaboration).toBe(2);
   });
@@ -143,9 +123,7 @@ describe("aggregateDev", () => {
       }),
       pr({ author: "alice", number: 3, title: "mid", comments: 3 }),
     ];
-    const d = aggregateDev("alice", prs, cfg);
-    // PR 2 wins (score 16). PRs 1 and 3 tie at score 3, broken by (repo, number):
-    // same repo, so ascending PR number → [2, 1, 3].
+    const d = aggregateDev("alice", prs, classification);
     expect(d.topPRs.map((p) => p.number)).toEqual([2, 1, 3]);
   });
 
@@ -155,7 +133,7 @@ describe("aggregateDev", () => {
       pr({ author: "alice", number: 1, linkedIssues: [linked] }),
       pr({ author: "alice", number: 2, linkedIssues: [linked] }),
     ];
-    const d = aggregateDev("alice", prs, cfg);
+    const d = aggregateDev("alice", prs, classification);
     expect(d.linkedIssuesClosed).toHaveLength(1);
   });
 
@@ -165,12 +143,12 @@ describe("aggregateDev", () => {
       pr({ author: "alice", number: 2, milestone: { title: "Launch A" } }),
       pr({ author: "alice", number: 3, milestone: { title: "Launch A" } }),
     ];
-    const d = aggregateDev("alice", prs, cfg);
+    const d = aggregateDev("alice", prs, classification);
     expect(d.shippedMilestones).toEqual(["Launch A", "Launch B"]);
   });
 
   it("zero PRs → empty buckets, not NaN", () => {
-    const d = aggregateDev("ghost", [], cfg);
+    const d = aggregateDev("ghost", [], classification);
     expect(d.prsMerged).toBe(0);
     expect(d.filesTouched).toBe(0);
     expect(d.crossRepoCollaboration).toBe(0);
@@ -190,7 +168,12 @@ describe("buildTeamQuarter", () => {
       }),
     ];
     const team = buildTeamQuarter(
-      cfg,
+      {
+        manager: "jdoe",
+        members: ["alice", "bob"],
+        repos: ["acme/svc-a", "acme/svc-b"],
+        classification,
+      },
       { label: "2026Q1", from: "2026-01-01", to: "2026-03-31" },
       new Map([
         ["acme/svc-a", prs.filter((p) => p.repo === "acme/svc-a")],
@@ -199,13 +182,18 @@ describe("buildTeamQuarter", () => {
       [],
     );
     expect(team.totals.prsMerged).toBe(2);
-    expect(team.totals.reviewsGiven).toBe(1); // alice reviewed bob's PR
+    expect(team.totals.reviewsGiven).toBe(1);
     expect(team.members.map((m) => m.login)).toEqual(["alice", "bob"]);
   });
 
   it("passes data gaps through", () => {
     const team = buildTeamQuarter(
-      cfg,
+      {
+        manager: "jdoe",
+        members: ["alice"],
+        repos: ["acme/svc-a"],
+        classification,
+      },
       { label: "2026Q1", from: "2026-01-01", to: "2026-03-31" },
       new Map(),
       [{ repo: "acme/svc-a", reason: "404", at: "2026-04-01T00:00:00Z" }],

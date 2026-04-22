@@ -1,6 +1,6 @@
 {
   "name": "shipreport",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Quarterly engineering success story generator — point it at a GitHub org, pick a quarter, get draft success stories per developer plus a team highlight reel.",
   "type": "module",
   "bin": {
@@ -26,6 +26,7 @@
     "format": "prettier -w ."
   },
   "dependencies": {
+    "@octokit/auth-app": "^7.2.2",
     "@octokit/graphql": "^8.1.1",
     "@octokit/plugin-retry": "^7.1.2",
     "@octokit/plugin-throttling": "^9.3.2",

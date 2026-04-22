@@ -31,5 +31,11 @@ RUN if [ "$WITH_PDF" = "1" ]; then \
       && echo "export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser" >> /root/.profile; \
     fi
 
+# Persist the state DB (audit log + scheduler last-runs) across container
+# restarts by mounting a volume at /root/.local/share/shipreport. If you don't,
+# the audit log starts empty on every run and the scheduler treats every
+# team as "never run".
+VOLUME ["/root/.local/share/shipreport", "/root/.cache/shipreport"]
+
 ENTRYPOINT ["node", "bin/shipreport.js"]
 CMD ["--help"]

@@ -1,6 +1,9 @@
-import type { Config } from "./config.js";
 import type { GithubClient } from "./github.js";
 import type { DataGap, QuarterRange, RawPR } from "./types.js";
+
+export interface ExtractScope {
+  repos: string[];
+}
 
 interface PullsNode {
   number: number;
@@ -89,7 +92,7 @@ export interface ExtractResult {
 
 export async function extractAll(
   client: GithubClient,
-  cfg: Config,
+  scope: ExtractScope,
   quarter: QuarterRange,
   log: (msg: string) => void = () => {},
 ): Promise<ExtractResult> {
@@ -99,7 +102,7 @@ export async function extractAll(
   const from = new Date(`${quarter.from}T00:00:00Z`).getTime();
   const to = new Date(`${quarter.to}T23:59:59Z`).getTime();
 
-  for (const repoPath of cfg.repos) {
+  for (const repoPath of scope.repos) {
     const [owner, name] = repoPath.split("/") as [string, string];
     try {
       const prs = await fetchRepoPRs(client, owner, name, from, to, log);
