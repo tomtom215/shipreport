@@ -3,6 +3,7 @@ import { resolveAuth } from "./auth.js";
 import { AuditLog } from "./audit.js";
 import type { Config, TeamConfig } from "./config.js";
 import { resolveHome, resolveTeam } from "./config.js";
+import { discoverMembers } from "./discover.js";
 import { extractAll } from "./extract.js";
 import { makeClient } from "./github.js";
 import {
@@ -20,7 +21,7 @@ export interface RunOptions {
   cfg: Config;
   team: TeamConfig;
   overrideQuarter?: string;
-  extraFormats?: ReadonlyArray<"md" | "html" | "pdf">;
+  extraFormats?: ReadonlyArray<"md" | "html" | "pdf" | "png">;
   log: (msg: string) => void;
   audit?: AuditLog;
   triggeredBy: "manual" | "schedule";
@@ -74,10 +75,37 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     log,
   );
 
+  let members: string[];
+  if (resolved.members) {
+    members = resolved.members;
+  } else {
+    const allPRs = [...prsByRepo.values()].flat();
+    const discovery = discoverMembers(allPRs, resolved.autoMembers);
+    members = discovery.members;
+    log(
+      `auto-discovered ${members.length} member(s) from ${discovery.considered} distinct author(s); skipped ${discovery.skippedBots.length} bot(s)`,
+    );
+    opts.audit?.append({
+      actor: auth.identity,
+      event: "members_discovered",
+      target: `${cfg.org}/${team.name}`,
+      payload: {
+        quarter: quarter.label,
+        members,
+        considered: discovery.considered,
+        skippedBots: discovery.skippedBots,
+        limit: resolved.autoMembers.limit,
+      },
+    });
+    if (members.length === 0) {
+      log(`no members discovered — no PRs in window, or all authors were bots`);
+    }
+  }
+
   const teamQuarter = buildTeamQuarter(
     {
       manager: resolved.manager,
-      members: resolved.members,
+      members,
       repos: resolved.repos,
       classification: resolved.classification,
     },
@@ -88,7 +116,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
 
   const version = await readPackageVersion();
   const generatedAt = new Date().toISOString();
-  const formats = [...resolved.output.formats];
+  const formats: Array<"md" | "html" | "pdf" | "png"> = [...resolved.output.formats];
   for (const f of opts.extraFormats ?? []) if (!formats.includes(f)) formats.push(f);
   const outDir = resolved.output.dir;
   const written: string[] = [];

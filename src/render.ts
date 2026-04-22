@@ -132,7 +132,7 @@ export async function writeReport(
   dir: string,
   basename: string,
   markdown: string,
-  formats: ReadonlyArray<"md" | "html" | "pdf">,
+  formats: ReadonlyArray<"md" | "html" | "pdf" | "png">,
   title: string,
 ): Promise<string[]> {
   await mkdir(dir, { recursive: true });
@@ -145,7 +145,7 @@ export async function writeReport(
   }
 
   let html: string | null = null;
-  if (formats.includes("html") || formats.includes("pdf")) {
+  if (formats.includes("html") || formats.includes("pdf") || formats.includes("png")) {
     html = mdToHtml(markdown, title);
   }
 
@@ -161,26 +161,59 @@ export async function writeReport(
     written.push(pdfPath);
   }
 
+  if (formats.includes("png") && html) {
+    const pngPath = path.join(dir, `${basename}.png`);
+    await renderPng(html, pngPath);
+    written.push(pngPath);
+  }
+
   return written;
 }
 
-async function renderPdf(html: string, outPath: string): Promise<void> {
+async function launchChromium(): Promise<{
+  browser: import("puppeteer").Browser;
+  close: () => Promise<void>;
+}> {
   let puppeteer: typeof import("puppeteer") | null = null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     puppeteer = (await import("puppeteer")) as any;
   } catch {
     throw new Error(
-      "PDF output requires the optional `puppeteer` dependency. Install with `pnpm add puppeteer`.",
+      "PDF/PNG output requires the optional `puppeteer` dependency. Install with `pnpm add puppeteer`.",
     );
   }
-  const browser = await puppeteer!.launch({ headless: true });
+  const browser = await puppeteer!.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  return { browser, close: () => browser.close() };
+}
+
+async function renderPdf(html: string, outPath: string): Promise<void> {
+  const { browser, close } = await launchChromium();
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "domcontentloaded" });
-    await page.pdf({ path: outPath, format: "Letter", margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" } });
+    await page.pdf({
+      path: outPath,
+      format: "Letter",
+      margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" },
+    });
   } finally {
-    await browser.close();
+    await close();
+  }
+}
+
+async function renderPng(html: string, outPath: string): Promise<void> {
+  const { browser, close } = await launchChromium();
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 900, height: 1200, deviceScaleFactor: 2 });
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+    await page.screenshot({ path: outPath as `${string}.png`, fullPage: true, type: "png" });
+  } finally {
+    await close();
   }
 }
 

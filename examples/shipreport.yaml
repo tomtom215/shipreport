@@ -40,6 +40,20 @@ teams:
     output:
       dir: ./out/platform        # per-team override
 
+  # Omit `members:` and shipreport auto-discovers them from merged-PR
+  # authors in the team's repos for the target quarter. Bots are filtered
+  # by default ([bot], -bot, -robot suffixes, plus dependabot/renovate/etc).
+  # Useful for open-source repos or any team where you'd rather not
+  # maintain a member list by hand.
+  - name: oss-contributors
+    manager: kdoe
+    repos:
+      - acme-eng/public-sdk
+    autoMembers:
+      limit: 10
+      excludeBots: true
+      excludeLogins: []
+
 # Defaults inherited by every team unless they override.
 defaults:
   quarter: 2026Q1

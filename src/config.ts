@@ -21,7 +21,7 @@ const Classification = z.object({
 
 const Output = z.object({
   dir: z.string().default("./out"),
-  formats: z.array(z.enum(["md", "html", "pdf"])).default(["md", "html"]),
+  formats: z.array(z.enum(["md", "html", "pdf", "png"])).default(["md", "html"]),
   perDev: z.boolean().default(true),
   teamSummary: z.boolean().default(true),
   managerRollup: z.boolean().default(true),
@@ -44,10 +44,19 @@ const Github = z.object({
   app: GithubApp.optional(),
 });
 
+const AutoMembers = z.object({
+  limit: z.number().int().positive().default(10),
+  excludeBots: z.boolean().default(true),
+  excludeLogins: z.array(z.string()).default([]),
+});
+
 const Team = z.object({
   name: z.string().min(1),
   manager: z.string().min(1),
-  members: z.array(z.string().min(1)).min(1),
+  // Omit `members` to auto-discover from merged-PR authors in the team's
+  // repos for the target quarter (top `autoMembers.limit`, bots filtered).
+  members: z.array(z.string().min(1)).min(1).optional(),
+  autoMembers: AutoMembers.optional(),
   repos: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).min(1),
   quarter: z.union([QuarterLabel, DateRange]).optional(),
   schedule: z.string().optional(),
@@ -226,7 +235,9 @@ export function quarterLabelToRange(label: string, _tz: string): QuarterRange {
 export interface ResolvedTeam {
   name: string;
   manager: string;
-  members: string[];
+  /** null when auto-discovery is requested; populated after extraction. */
+  members: string[] | null;
+  autoMembers: z.infer<typeof AutoMembers>;
   repos: string[];
   quarter: QuarterRange;
   schedule: string | null;
@@ -242,10 +253,12 @@ export function resolveTeam(cfg: Config, team: TeamConfig): ResolvedTeam {
     ...cfg.defaults.classification,
     ...(team.classification ?? {}),
   });
+  const autoMembers = AutoMembers.parse(team.autoMembers ?? {});
   return {
     name: team.name,
     manager: team.manager,
-    members: team.members,
+    members: team.members ?? null,
+    autoMembers,
     repos: team.repos,
     quarter,
     schedule: team.schedule ?? null,

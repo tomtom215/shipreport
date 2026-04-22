@@ -41,6 +41,18 @@ describe("normalize (legacy single-team → multi-team)", () => {
     expect(cfg.defaults.quarter).toBe("2026Q1");
   });
 
+  it("accepts a team without members (auto-discovery)", () => {
+    const cfg = normalize({
+      github: {},
+      org: "acme",
+      teams: [
+        { name: "checkout", manager: "jdoe", repos: ["acme/checkout"] },
+      ],
+      defaults: { quarter: "2026Q1" },
+    });
+    expect(cfg.teams[0]!.members).toBeUndefined();
+  });
+
   it("rejects when neither shape matches", () => {
     expect(() =>
       normalize({

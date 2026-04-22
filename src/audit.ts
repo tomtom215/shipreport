@@ -23,7 +23,8 @@ export type AuditEvent =
   | "schedule_triggered"
   | "report_written"
   | "config_loaded"
-  | "cache_pruned";
+  | "cache_pruned"
+  | "members_discovered";
 
 export interface AuditRow {
   seq: number;

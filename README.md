@@ -29,7 +29,7 @@ export SHIPREPORT_APP_PRIVATE_KEY="$(cat app.pem)"
 shipreport run --config shipreport.yaml --team checkout
 ```
 
-Outputs land in `./out/<team>/` as Markdown + HTML (+ optional PDF):
+Outputs land in `./out/<team>/` as Markdown + HTML (+ optional PDF/PNG):
 
 ```
 out/
@@ -53,6 +53,7 @@ actually look like.
 shipreport run --team <name>              # one team
 shipreport run --all                      # every team in the config
 shipreport run --team <name> --quarter 2026Q2   # override the quarter
+shipreport run --team <name> --pdf --png  # also emit PDF and PNG
 
 shipreport preview --team <name> --member asmith
 
@@ -96,6 +97,29 @@ defaults:
 
 The legacy v0.1 single-team shape (`team: {}` + top-level `repos:`) still works
 — shipreport normalizes it to a one-entry `teams:` array on load.
+
+### Auto-discovered members
+
+Omit `members:` and shipreport will pick the team from merged-PR activity in
+the team's repos for the target quarter:
+
+```yaml
+teams:
+  - name: oss
+    manager: auto
+    repos: [vllm-project/vllm]
+    autoMembers:
+      limit: 10           # top 10 merged-PR authors
+      excludeBots: true   # drops [bot], -bot, -robot, dependabot, renovate, etc.
+      excludeLogins: []   # additional opt-outs
+```
+
+Ties are broken alphabetically, so the same inputs always produce the same
+team. The discovered list is recorded in the audit log (`members_discovered`)
+with every run so the output is reproducible and evidence-backed.
+
+See [`examples/vllm.yaml`](./examples/vllm.yaml) for a public-repo demo that
+requires nothing beyond a token.
 
 ---
 

@@ -20,6 +20,7 @@ const run = defineCommand({
     all: { type: "boolean", description: "Run every team in the config", default: false },
     quarter: { type: "string", description: "Override quarter, e.g. 2026Q1" },
     pdf: { type: "boolean", description: "Also emit PDF (requires puppeteer)", default: false },
+    png: { type: "boolean", description: "Also emit PNG (requires puppeteer)", default: false },
     verbose: { type: "boolean", alias: "v", default: false },
   },
   async run({ args }) {
@@ -39,7 +40,9 @@ const run = defineCommand({
     });
 
     const teams = selectTeams(cfg, args.all ? undefined : args.team);
-    const extra: Array<"md" | "html" | "pdf"> = args.pdf ? ["pdf"] : [];
+    const extra: Array<"md" | "html" | "pdf" | "png"> = [];
+    if (args.pdf) extra.push("pdf");
+    if (args.png) extra.push("png");
     const results: Array<{ team: string; ok: boolean; err?: string }> = [];
 
     for (const t of teams) {
@@ -94,7 +97,7 @@ const preview = defineCommand({
     const log = logger(args.verbose);
     const teams = selectTeams(cfg, args.team);
     const t = teams[0]!;
-    if (!t.members.includes(args.member)) {
+    if (t.members && !t.members.includes(args.member)) {
       console.error(
         `Warning: ${args.member} is not in team "${args.team}". Proceeding anyway.`,
       );
