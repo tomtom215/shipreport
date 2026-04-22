@@ -1,0 +1,43 @@
+# Zero-config-team demo: point shipreport at a public repo and let it
+# figure out who "the team" is from merged-PR activity.
+#
+# Usage:
+#   export SHIPREPORT_GITHUB_TOKEN=ghp_...     # public_repo scope is enough
+#   shipreport run --config examples/vllm.yaml --team vllm --pdf --png
+#
+# The `members` field is deliberately omitted; shipreport will discover
+# the top 10 merged-PR authors for the target quarter (bots filtered).
+
+github:
+  baseUrl: https://api.github.com
+  graphqlUrl: https://api.github.com/graphql
+  tokenEnv: SHIPREPORT_GITHUB_TOKEN
+
+org: vllm-project
+
+teams:
+  - name: vllm
+    manager: auto
+    repos:
+      - vllm-project/vllm
+    autoMembers:
+      limit: 10
+      excludeBots: true
+
+defaults:
+  quarter: 2026Q1
+  timezone: UTC
+  output:
+    dir: ./out/vllm-2026Q1
+    formats: [md, html, png]
+    perDev: true
+    teamSummary: true
+    managerRollup: true
+
+audit:
+  enabled: true
+  path: ~/.local/share/shipreport/state.sqlite
+
+cache:
+  path: ~/.cache/shipreport/cache.sqlite
+  ttlDays: 7

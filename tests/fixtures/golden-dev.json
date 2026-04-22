@@ -1,0 +1,93 @@
+{
+  "login": "asmith",
+  "displayName": "asmith",
+  "prsMerged": 7,
+  "prsByKind": {
+    "feature": 3,
+    "bugfix": 2,
+    "refactor": 1,
+    "docs": 0,
+    "infra": 1,
+    "other": 0
+  },
+  "filesTouched": 84,
+  "reviewsGiven": 19,
+  "reviewsOnOwnPRs": 8,
+  "crossRepoCollaboration": 2,
+  "topPRs": [
+    {
+      "repo": "acme-eng/checkout-service",
+      "number": 412,
+      "url": "https://github.com/acme-eng/checkout-service/pull/412",
+      "title": "feat(checkout): Apple Pay integration",
+      "mergedAt": "2026-02-14T16:22:00Z",
+      "author": "asmith",
+      "reviewers": ["blee", "cwong"],
+      "linkedIssues": ["acme-eng/checkout-service#401"],
+      "body": "Adds Apple Pay as a payment method behind a feature flag.\n\nFixes #401",
+      "labels": ["feature"],
+      "milestone": "2026Q1-launch",
+      "kind": "feature",
+      "reviewCount": 4,
+      "commentCount": 12,
+      "filesChanged": 22,
+      "additions": 310,
+      "deletions": 18
+    },
+    {
+      "repo": "acme-eng/billing-api",
+      "number": 287,
+      "url": "https://github.com/acme-eng/billing-api/pull/287",
+      "title": "fix: correct proration on mid-cycle plan change",
+      "mergedAt": "2026-01-30T12:10:00Z",
+      "author": "asmith",
+      "reviewers": ["cwong"],
+      "linkedIssues": ["acme-eng/billing-api#285"],
+      "body": "Proration was off by one day when a plan change landed exactly at cycle boundary.",
+      "labels": ["bug", "p1"],
+      "milestone": null,
+      "kind": "bugfix",
+      "reviewCount": 3,
+      "commentCount": 5,
+      "filesChanged": 4,
+      "additions": 40,
+      "deletions": 12
+    },
+    {
+      "repo": "acme-eng/checkout-service",
+      "number": 405,
+      "url": "https://github.com/acme-eng/checkout-service/pull/405",
+      "title": "refactor(cart): extract pricing pipeline",
+      "mergedAt": "2026-01-18T09:05:00Z",
+      "author": "asmith",
+      "reviewers": ["blee"],
+      "linkedIssues": [],
+      "body": "Pulls the cart pricing logic into a standalone module so we can unit test it in isolation.",
+      "labels": [],
+      "milestone": null,
+      "kind": "refactor",
+      "reviewCount": 2,
+      "commentCount": 3,
+      "filesChanged": 11,
+      "additions": 180,
+      "deletions": 150
+    }
+  ],
+  "shippedMilestones": ["2026Q1-launch"],
+  "linkedIssuesClosed": [
+    {
+      "repo": "acme-eng/checkout-service",
+      "number": 401,
+      "title": "Apple Pay support",
+      "url": "https://github.com/acme-eng/checkout-service/issues/401",
+      "closedAt": "2026-02-14T16:22:00Z"
+    },
+    {
+      "repo": "acme-eng/billing-api",
+      "number": 285,
+      "title": "Proration bug",
+      "url": "https://github.com/acme-eng/billing-api/issues/285",
+      "closedAt": "2026-01-30T12:10:00Z"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+name: shipreport-tick
+
+# Hourly. `shipreport schedule tick` runs only teams whose cron is due since
+# their last recorded run — most hours it's a no-op. Workflow_dispatch lets
+# managers trigger ad-hoc runs from the Actions UI.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      team:
+        description: "Team name (leave empty for --all)"
+        required: false
+      quarter:
+        description: "Override quarter (e.g. 2026Q2)"
+        required: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Restore the scheduler/audit state DB between runs. First run on a new
+      # branch: cache miss → treated as "never run" and everything schedules.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/shipreport
+          key: shipreport-state-${{ github.ref_name }}
+
+      - name: Scheduled tick
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+        run: node bin/shipreport.js schedule tick --config shipreport.yaml --verbose
+
+      - name: Manual run
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "${{ inputs.team }}" ]; then
+            node bin/shipreport.js run --config shipreport.yaml \
+              --team "${{ inputs.team }}" \
+              ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
+              --verbose
+          else
+            node bin/shipreport.js run --config shipreport.yaml --all \
+              ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
+              --verbose
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shipreport-${{ github.run_id }}
+          path: out/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Audit tail
+        if: always()
+        run: node bin/shipreport.js audit tail --config shipreport.yaml --limit 20 || true
