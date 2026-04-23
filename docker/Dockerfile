@@ -6,7 +6,7 @@
 # locally with:
 #   docker pull node:24-alpine
 #   docker inspect --format='{{index .RepoDigests 0}}' node:24-alpine
-FROM node:24-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000 AS build
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS build
 # NOTE: digest above is a placeholder; dependabot resolves it on first
 # weekly scan. If you're cutting a release before dependabot has run,
 # replace the digest manually using the command above.
@@ -19,7 +19,7 @@ COPY src ./src
 COPY scripts ./scripts
 RUN pnpm build
 
-FROM node:24-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4
 WORKDIR /app
 ENV NODE_ENV=production
 
