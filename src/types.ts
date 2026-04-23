@@ -99,6 +99,8 @@ export interface RawPR {
   body: string;
   state: string;
   mergedAt: string | null;
+  /** ISO-8601. Cache uses this to decide which PRs need re-fetching. */
+  updatedAt: string;
   author: string;
   /** Co-author logins parsed from merge commit Co-authored-by: trailers. */
   coAuthors: string[];

@@ -16,6 +16,12 @@ export interface CacheEntry {
   fetchedAt: number;
 }
 
+/** Opaque snapshot row for the per-(repo, quarter) extract cache. */
+export interface ExtractSnapshotRow {
+  body: string;
+  fetchedAt: number;
+}
+
 export class Cache {
   private db: DatabaseSync;
   private ttlMs: number;
@@ -31,6 +37,13 @@ export class Cache {
         fetched_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_http_cache_fetched ON http_cache(fetched_at);
+
+      CREATE TABLE IF NOT EXISTS extract_snapshots (
+        key TEXT PRIMARY KEY,
+        body TEXT NOT NULL,
+        fetched_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_extract_fetched ON extract_snapshots(fetched_at);
     `);
   }
 
@@ -56,14 +69,34 @@ export class Cache {
       .run(key, etag, body, Date.now());
   }
 
-  isFresh(entry: CacheEntry): boolean {
+  getExtractSnapshot(key: string): ExtractSnapshotRow | null {
+    const row = this.db
+      .prepare("SELECT body, fetched_at FROM extract_snapshots WHERE key = ?")
+      .get(key) as { body: string; fetched_at: number } | undefined;
+    if (!row) return null;
+    return { body: row.body, fetchedAt: row.fetched_at };
+  }
+
+  setExtractSnapshot(key: string, body: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO extract_snapshots(key, body, fetched_at) VALUES(?, ?, ?) " +
+          "ON CONFLICT(key) DO UPDATE SET body = excluded.body, fetched_at = excluded.fetched_at",
+      )
+      .run(key, body, Date.now());
+  }
+
+  isFresh(entry: { fetchedAt: number }): boolean {
     return Date.now() - entry.fetchedAt < this.ttlMs;
   }
 
   prune(): number {
     const cutoff = Date.now() - this.ttlMs;
-    const info = this.db.prepare("DELETE FROM http_cache WHERE fetched_at < ?").run(cutoff);
-    return Number(info.changes ?? 0);
+    const a = this.db.prepare("DELETE FROM http_cache WHERE fetched_at < ?").run(cutoff);
+    const b = this.db
+      .prepare("DELETE FROM extract_snapshots WHERE fetched_at < ?")
+      .run(cutoff);
+    return Number(a.changes ?? 0) + Number(b.changes ?? 0);
   }
 
   close(): void {

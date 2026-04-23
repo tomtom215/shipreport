@@ -78,6 +78,11 @@ const Cache = z.object({
   ttlDays: z.number().int().positive().default(7),
 });
 
+const Extract = z.object({
+  /** Max concurrent per-repo GraphQL fetches (default 4). */
+  concurrency: z.number().int().positive().max(32).default(4),
+});
+
 // Full (new) shape.
 const MultiTeamShape = z.object({
   github: Github.default({
@@ -125,6 +130,7 @@ const MultiTeamShape = z.object({
     }),
   audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
+  extract: Extract.default({ concurrency: 4 }),
 });
 
 // Legacy (v0.1) single-team shape — still accepted; normalized to multi-team.
@@ -157,6 +163,7 @@ const LegacyShape = z.object({
   }),
   audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
+  extract: Extract.default({ concurrency: 4 }),
 });
 
 export type Config = z.infer<typeof MultiTeamShape>;
@@ -207,6 +214,7 @@ function legacyToMulti(l: z.infer<typeof LegacyShape>): Config {
     },
     audit: l.audit,
     cache: l.cache,
+    extract: { concurrency: 4 },
   };
 }
 

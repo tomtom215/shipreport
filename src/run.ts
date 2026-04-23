@@ -3,8 +3,9 @@ import { resolveAuth } from "./auth.js";
 import { AuditLog } from "./audit.js";
 import type { Config, TeamConfig } from "./config.js";
 import { resolveHome, resolveTeam } from "./config.js";
+import { createCounters, type RunCounters } from "./counters.js";
 import { discoverMembers } from "./discover.js";
-import { extractAll } from "./extract.js";
+import { ExtractCache, extractAll } from "./extract.js";
 import { makeClient } from "./github.js";
 import {
   readPackageVersion,
@@ -25,6 +26,10 @@ export interface RunOptions {
   log: (msg: string) => void;
   audit?: AuditLog;
   triggeredBy: "manual" | "schedule";
+  /** Override config.extract.concurrency for this run. */
+  concurrency?: number;
+  /** Skip network, read only from cache. Cold cache → runTeam throws. */
+  dryRun?: boolean;
 }
 
 export interface RunResult {
@@ -32,10 +37,14 @@ export interface RunResult {
   quarter: string;
   written: string[];
   gaps: { repo: string; reason: string }[];
+  counters: RunCounters;
 }
 
 export async function runTeam(opts: RunOptions): Promise<RunResult> {
   const { cfg, team, log } = opts;
+  const counters = createCounters();
+  const startedAt = Date.now();
+
   const auth = await resolveAuth(cfg);
   opts.audit?.append({
     actor: auth.identity,
@@ -50,29 +59,40 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       : team;
   const resolved = resolveTeam(cfg, teamCfg);
   const quarter = resolved.quarter;
+  const concurrency = opts.concurrency ?? cfg.extract.concurrency;
 
-  log(`team=${team.name} quarter=${quarter.label} (${quarter.from} → ${quarter.to})`);
+  log(
+    `team=${team.name} quarter=${quarter.label} (${quarter.from} → ${quarter.to}) concurrency=${concurrency}${opts.dryRun ? " dry-run" : ""}`,
+  );
   opts.audit?.append({
     actor: auth.identity,
     event: "run_started",
     target: `${cfg.org}/${team.name}`,
-    payload: { quarter: quarter.label, repos: team.repos, triggeredBy: opts.triggeredBy },
+    payload: {
+      quarter: quarter.label,
+      repos: team.repos,
+      triggeredBy: opts.triggeredBy,
+      concurrency,
+      dryRun: opts.dryRun === true,
+    },
   });
 
-  const cache = await Cache.open(resolveHome(cfg.cache.path), cfg.cache.ttlDays);
+  const cacheHandle = await Cache.open(resolveHome(cfg.cache.path), cfg.cache.ttlDays);
+  const extractCache = new ExtractCache(cacheHandle);
   const client = makeClient({
     token: auth.token,
     baseUrl: cfg.github.baseUrl,
     graphqlUrl: cfg.github.graphqlUrl,
     log,
-    cache,
+    cache: cacheHandle,
+    counters,
   });
 
   const { prsByRepo, gaps, droppedNonDefaultBranch } = await extractAll(
     client,
     { repos: resolved.repos },
     quarter,
-    log,
+    { concurrency, dryRun: opts.dryRun, counters, cache: extractCache, log },
   );
   if (droppedNonDefaultBranch > 0) {
     log(
@@ -162,7 +182,10 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     );
     written.push(...paths);
   }
-  cache.close();
+
+  // One cheap probe to capture remaining quota after the real work is done.
+  if (!opts.dryRun) counters.remainingRateLimit = await client.probeRemaining();
+  cacheHandle.close();
 
   for (const p of written) {
     opts.audit?.append({
@@ -172,6 +195,8 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       payload: { path: p },
     });
   }
+
+  counters.wallMs = Date.now() - startedAt;
   opts.audit?.append({
     actor: auth.identity,
     event: "run_completed",
@@ -181,6 +206,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       filesWritten: written.length,
       dataGaps: gaps.length,
       droppedNonDefaultBranch,
+      counters,
     },
   });
 
@@ -189,6 +215,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     quarter: quarter.label,
     written,
     gaps: gaps.map((g) => ({ repo: g.repo, reason: g.reason })),
+    counters,
   };
 }
 

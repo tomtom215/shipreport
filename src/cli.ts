@@ -21,6 +21,15 @@ const run = defineCommand({
     quarter: { type: "string", description: "Override quarter, e.g. 2026Q1" },
     pdf: { type: "boolean", description: "Also emit PDF (requires puppeteer)", default: false },
     png: { type: "boolean", description: "Also emit PNG (requires puppeteer)", default: false },
+    concurrency: {
+      type: "string",
+      description: "Max concurrent per-repo fetches (overrides extract.concurrency)",
+    },
+    dryRun: {
+      type: "boolean",
+      description: "Don't hit the network; fail if cache is cold",
+      default: false,
+    },
     verbose: { type: "boolean", alias: "v", default: false },
   },
   async run({ args }) {
@@ -45,6 +54,16 @@ const run = defineCommand({
     if (args.png) extra.push("png");
     const results: Array<{ team: string; ok: boolean; err?: string }> = [];
 
+    const concurrencyOverride = args.concurrency
+      ? (() => {
+          const n = Number(args.concurrency);
+          if (!Number.isFinite(n) || n < 1) {
+            throw new Error(`--concurrency must be a positive integer (got ${args.concurrency})`);
+          }
+          return Math.floor(n);
+        })()
+      : undefined;
+
     for (const t of teams) {
       try {
         const r = await runTeam({
@@ -55,6 +74,8 @@ const run = defineCommand({
           log,
           audit,
           triggeredBy: "manual",
+          concurrency: concurrencyOverride,
+          dryRun: args.dryRun,
         });
         if (state) scheduleStoreFor(state).record(t.name, "ok", r.quarter);
         console.log(`[${t.name}] wrote ${r.written.length} file(s):`);

@@ -54,6 +54,8 @@ shipreport run --team <name>              # one team
 shipreport run --all                      # every team in the config
 shipreport run --team <name> --quarter 2026Q2   # override the quarter
 shipreport run --team <name> --pdf --png  # also emit PDF and PNG
+shipreport run --team <name> --concurrency 8    # per-repo fetch concurrency
+shipreport run --team <name> --dry-run          # cache-only; no network
 
 shipreport preview --team <name> --member asmith
 
@@ -67,6 +69,11 @@ shipreport audit verify                   # check the hash chain
 shipreport cache prune
 shipreport doctor
 ```
+
+`--dry-run` is for iterating on classification labels without burning API
+quota: shipreport replays from the local SQLite cache, skipping all GitHub
+traffic. If any repo's cache is cold, it fails loudly rather than silently
+producing empty output.
 
 `shipreport preview` prints a dev's story to stdout — useful when tuning
 classification labels.
@@ -190,6 +197,23 @@ trigger appends one row to a local SQLite `audit_log` table. Rows include:
 The chain anchors at sha256 zero. `shipreport audit verify` walks the chain and
 flags any row whose hash doesn't recompute, or whose `prev_hash` doesn't match
 its predecessor. Deleting, editing, or reordering a row breaks the chain.
+
+Every `run_completed` row carries a `counters` payload:
+
+```json
+{
+  "apiCalls": 42,
+  "rateLimitSleepsMs": 0,
+  "cacheHits": 118,
+  "peakConcurrency": 4,
+  "remainingRateLimit": 4958,
+  "wallMs": 3142
+}
+```
+
+Use it to post-hoc answer "was this run fast?", "did we sleep on rate
+limits?", or "how much did the incremental cache help?" — without adding a
+metrics stack.
 
 The DB is local by default. For centralized evidence, ship the SQLite file to
 your compliance bucket on a schedule, or periodically run
