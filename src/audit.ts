@@ -20,11 +20,14 @@ export type AuditEvent =
   | "run_completed"
   | "run_failed"
   | "token_resolved"
+  | "token_renewed"
   | "schedule_triggered"
   | "report_written"
   | "config_loaded"
   | "cache_pruned"
-  | "members_discovered";
+  | "members_discovered"
+  | "rate_limit_degraded"
+  | "extract_checkpointed";
 
 export interface AuditRow {
   seq: number;
@@ -82,6 +85,36 @@ export class AuditLog {
       .prepare(`SELECT hash FROM audit_log ORDER BY seq DESC LIMIT 1`)
       .get() as { hash: string } | undefined;
     return row?.hash ?? ZERO;
+  }
+
+  /**
+   * Read rows chronologically (seq ASC), optionally from a `since` lower
+   * bound. Intended for `audit export`: a downstream verifier needs the
+   * chain in order to reconstruct it.
+   */
+  readForward(since?: string): AuditRow[] {
+    const rows = since
+      ? (this.state.db
+          .prepare(
+            `SELECT seq, at, actor, event, target, payload, prev_hash, hash
+             FROM audit_log WHERE at >= ? ORDER BY seq ASC`,
+          )
+          .all(since) as RawRow[])
+      : (this.state.db
+          .prepare(
+            `SELECT seq, at, actor, event, target, payload, prev_hash, hash
+             FROM audit_log ORDER BY seq ASC`,
+          )
+          .all() as RawRow[]);
+    return rows.map(rawToRow);
+  }
+
+  /** Current chain head {seq, hash}, or null if the log is empty. */
+  head(): { seq: number; hash: string } | null {
+    const row = this.state.db
+      .prepare(`SELECT seq, hash FROM audit_log ORDER BY seq DESC LIMIT 1`)
+      .get() as { seq: number; hash: string } | undefined;
+    return row ? { seq: row.seq, hash: row.hash } : null;
   }
 
   tail(limit: number, since?: string): AuditRow[] {
@@ -155,12 +188,12 @@ function rawToRow(r: RawRow): AuditRow {
   };
 }
 
-function sha256(s: string): string {
+export function sha256(s: string): string {
   return createHash("sha256").update(s).digest("hex");
 }
 
 /** Deterministic JSON serialization: sorted object keys, no whitespace. */
-function canonicalize(v: unknown): string {
+export function canonicalize(v: unknown): string {
   return JSON.stringify(sortKeys(v));
 }
 

@@ -1,0 +1,9 @@
+{
+  // Generated sample outputs embed full PR titles / manager prose that
+  // legitimately exceed 80 cols and may contain bare URLs in tables.
+  "MD013": false, // line-length
+  "MD033": false, // inline HTML (HTML comments in Eta templates)
+  "MD034": false, // bare URLs (PR links in tables)
+  "MD041": false, // first line must be H1 (manager-rollup starts with H1 followed by metadata line)
+  "MD060": false  // table pipe alignment — cosmetic only, renderers don't care
+}

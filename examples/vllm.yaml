@@ -2,11 +2,12 @@
 # figure out who "the team" is from merged-PR activity.
 #
 # Usage:
-#   export SHIPREPORT_GITHUB_TOKEN=ghp_...     # public_repo scope is enough
+#   export SHIPREPORT_GITHUB_TOKEN=ghp_...    # public_repo scope is enough
 #   shipreport run --config examples/vllm.yaml --team vllm --pdf --png
 #
-# The `members` field is deliberately omitted; shipreport will discover
-# the top 10 merged-PR authors for the target quarter (bots filtered).
+# The `members` field is deliberately omitted; shipreport discovers the top
+# 10 merged-PR authors for the target quarter (bots filtered, deterministic
+# tie-break by login so reruns are stable).
 
 github:
   baseUrl: https://api.github.com
@@ -27,6 +28,7 @@ teams:
 defaults:
   quarter: 2026Q1
   timezone: UTC
+  coAuthorCredit: full
   output:
     dir: ./out/vllm-2026Q1
     formats: [md, html, png]
@@ -37,7 +39,13 @@ defaults:
 audit:
   enabled: true
   path: ~/.local/share/shipreport/state.sqlite
+  signingKeyPath: ~/.config/shipreport/audit-ed25519.pem
+  signer: vllm-demo
 
 cache:
   path: ~/.cache/shipreport/cache.sqlite
   ttlDays: 7
+
+extract:
+  concurrency: 4
+  rateLimitThreshold: 100

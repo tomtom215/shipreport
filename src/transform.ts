@@ -1,5 +1,10 @@
 import { classifyPR } from "./classify.js";
 import type { ClassificationConfig } from "./classify.js";
+import {
+  detectRevert,
+  mergeLinkedIssues,
+  parseBodyIssueRefs,
+} from "./pr-parse.js";
 import type {
   DevQuarter,
   IssueRef,
@@ -14,10 +19,28 @@ function emptyKinds(): Record<PRKind, number> {
   return { feature: 0, bugfix: 0, refactor: 0, docs: 0, infra: 0, other: 0 };
 }
 
+export type CoAuthorCredit = "full" | "split";
+
+export interface TransformOptions {
+  classification: ClassificationConfig;
+  coAuthorCredit: CoAuthorCredit;
+}
+
+/** Substantive review = non-COMMENTED state, or COMMENTED with inline replies. */
+export function isSubstantiveReview(r: RawPR["reviews"][number]): boolean {
+  if (r.state !== "COMMENTED") return true;
+  return (r.inlineCommentCount ?? 0) > 0;
+}
+
 export function toPRSummary(pr: RawPR, cfg: ClassificationConfig): PRSummary {
-  const reviewers = Array.from(
-    new Set(pr.reviews.filter((r) => r.user !== pr.author).map((r) => r.user)),
+  const mergedIssues = mergeLinkedIssues(pr.linkedIssues, parseBodyIssueRefs(pr.body), pr.repo);
+  const reviewersSet = new Set(
+    pr.reviews.filter((r) => r.user !== pr.author).map((r) => r.user),
   );
+  const substantiveReviewers = new Set(
+    pr.reviews.filter((r) => r.user !== pr.author && isSubstantiveReview(r)).map((r) => r.user),
+  );
+  const revert = detectRevert(pr.title, pr.body);
   return {
     repo: pr.repo,
     number: pr.number,
@@ -25,17 +48,24 @@ export function toPRSummary(pr: RawPR, cfg: ClassificationConfig): PRSummary {
     title: pr.title,
     mergedAt: pr.mergedAt ?? "",
     author: pr.author,
-    reviewers,
-    linkedIssues: pr.linkedIssues.map((i) => `${i.repo}#${i.number}`),
+    coAuthors: [...pr.coAuthors],
+    reviewers: [...reviewersSet],
+    linkedIssues: mergedIssues.map((i) => `${i.repo}#${i.number}`),
     body: pr.body,
     labels: pr.labels.map((l) => l.name),
     milestone: pr.milestone?.title ?? null,
     kind: classifyPR(pr, cfg),
-    reviewCount: pr.reviews.length,
+    reviewEventsCount: pr.reviews.length,
+    reviewCount: substantiveReviewers.size,
     commentCount: pr.comments,
     filesChanged: pr.changedFiles,
     additions: pr.additions,
     deletions: pr.deletions,
+    isRevert: revert !== null,
+    revert:
+      revert && revert.revertedNumber !== null
+        ? { repo: pr.repo, number: revert.revertedNumber }
+        : null,
   };
 }
 
@@ -50,42 +80,102 @@ function byRankThenNumber(a: PRSummary, b: PRSummary): number {
   return a.number - b.number;
 }
 
+/** Return everyone credited for a PR (author + co-authors, deduped). */
+export function creditedContributors(pr: RawPR): string[] {
+  const out = new Set<string>();
+  if (pr.author) out.add(pr.author);
+  for (const c of pr.coAuthors) if (c !== pr.author) out.add(c);
+  return [...out];
+}
+
+function creditShare(contributors: number, mode: CoAuthorCredit): number {
+  if (mode === "split" && contributors > 0) return 1 / contributors;
+  return 1;
+}
+
+/** Map each PR to the reverted-original key `${repo}#${number}`, when applicable. */
+function revertTargets(prs: RawPR[]): Map<string, RawPR> {
+  const m = new Map<string, RawPR>();
+  for (const pr of prs) {
+    const info = detectRevert(pr.title, pr.body);
+    if (info && info.revertedNumber !== null) {
+      m.set(`${pr.repo}#${info.revertedNumber}`, pr);
+    }
+  }
+  return m;
+}
+
 export function aggregateDev(
   login: string,
   prs: RawPR[],
-  classification: ClassificationConfig,
+  opts: TransformOptions,
 ): DevQuarter {
-  const authored = prs.filter((p) => p.author === login && p.mergedAt);
-  const summaries = authored.map((p) => toPRSummary(p, classification));
+  const share = (pr: RawPR): number =>
+    creditShare(creditedContributors(pr).length, opts.coAuthorCredit);
+
+  const credited = prs.filter((p) => p.mergedAt && creditedContributors(p).includes(login));
+  const summaries = credited.map((p) => toPRSummary(p, opts.classification));
+
+  const reverts = revertTargets(prs);
 
   const kinds = emptyKinds();
+  let prsMerged = 0;
   let filesTouched = 0;
+  let revertsAuthored = 0;
+  let revertsReceived = 0;
   const repos = new Set<string>();
   const milestones = new Set<string>();
   const issues: IssueRef[] = [];
   const seenIssue = new Set<string>();
   let reviewsOnOwn = 0;
 
-  for (const raw of authored) {
-    filesTouched += raw.changedFiles;
+  for (let i = 0; i < credited.length; i++) {
+    const raw = credited[i]!;
+    const s = summaries[i]!;
+    const w = share(raw);
+    prsMerged += w;
+    filesTouched += raw.changedFiles * w;
+    kinds[s.kind] += w;
+    if (s.isRevert) revertsAuthored += w;
     repos.add(raw.repo);
     if (raw.milestone?.title) milestones.add(raw.milestone.title);
-    reviewsOnOwn += raw.reviews.filter((r) => r.user !== login && r.state === "APPROVED").length;
-    for (const li of raw.linkedIssues) {
-      const key = `${li.repo}#${li.number}`;
-      if (!seenIssue.has(key)) {
-        seenIssue.add(key);
-        issues.push(li);
+    reviewsOnOwn += raw.reviews.filter(
+      (r) => r.user !== login && r.state === "APPROVED",
+    ).length;
+
+    for (const li of s.linkedIssues) {
+      if (!seenIssue.has(li)) {
+        seenIssue.add(li);
+        // Find the full IssueRef for this key from the merged list.
+        const merged = mergeLinkedIssues(raw.linkedIssues, parseBodyIssueRefs(raw.body), raw.repo);
+        const match = merged.find((m) => `${m.repo}#${m.number}` === li);
+        if (match) issues.push(match);
       }
     }
+
+    // Did a revert in THIS window undo one of this dev's PRs?
+    const revertOfMine = reverts.get(`${raw.repo}#${raw.number}`);
+    if (revertOfMine && raw.author === login) {
+      revertsReceived += 1;
+      // Subtract the reverted PR from the original author's prsMerged.
+      prsMerged -= w;
+      filesTouched -= raw.changedFiles * w;
+      kinds[s.kind] -= w;
+    }
   }
-  for (const s of summaries) kinds[s.kind] += 1;
 
   let reviewsGiven = 0;
+  let reviewEventsGiven = 0;
   for (const p of prs) {
     if (p.author === login) continue;
+    const seenSubstantive = new Set<string>();
     for (const r of p.reviews) {
-      if (r.user === login) reviewsGiven += 1;
+      if (r.user !== login) continue;
+      reviewEventsGiven += 1;
+      if (isSubstantiveReview(r) && !seenSubstantive.has(p.repo + "#" + p.number)) {
+        seenSubstantive.add(p.repo + "#" + p.number);
+        reviewsGiven += 1;
+      }
     }
   }
 
@@ -94,10 +184,13 @@ export function aggregateDev(
   return {
     login,
     displayName: login,
-    prsMerged: summaries.length,
-    prsByKind: kinds,
-    filesTouched,
+    prsMerged: roundCredit(prsMerged),
+    prsByKind: roundKinds(kinds),
+    revertsAuthored: roundCredit(revertsAuthored),
+    revertsReceived,
+    filesTouched: roundCredit(filesTouched),
     reviewsGiven,
+    reviewEventsGiven,
     reviewsOnOwnPRs: reviewsOnOwn,
     crossRepoCollaboration: repos.size,
     topPRs,
@@ -108,11 +201,25 @@ export function aggregateDev(
   };
 }
 
+/** Keep totals presentable: integers where exact, one decimal when fractional. */
+function roundCredit(n: number): number {
+  if (n < 0) return 0;
+  const rounded = Math.round(n * 10) / 10;
+  return Number.isInteger(rounded) ? rounded : rounded;
+}
+
+function roundKinds(k: Record<PRKind, number>): Record<PRKind, number> {
+  const out = emptyKinds();
+  for (const key of Object.keys(k) as PRKind[]) out[key] = roundCredit(k[key]);
+  return out;
+}
+
 export interface AggregateScope {
   manager: string;
   members: string[];
   repos: string[];
   classification: ClassificationConfig;
+  coAuthorCredit: CoAuthorCredit;
 }
 
 export function buildTeamQuarter(
@@ -122,9 +229,11 @@ export function buildTeamQuarter(
   gaps: TeamQuarter["dataGaps"],
 ): TeamQuarter {
   const allPRs = [...prsByRepo.values()].flat();
-  const members = scope.members.map((login) =>
-    aggregateDev(login, allPRs, scope.classification),
-  );
+  const opts: TransformOptions = {
+    classification: scope.classification,
+    coAuthorCredit: scope.coAuthorCredit,
+  };
+  const members = scope.members.map((login) => aggregateDev(login, allPRs, opts));
 
   const repoSet = new Set<string>();
   const issueSet = new Set<string>();
@@ -142,7 +251,7 @@ export function buildTeamQuarter(
     manager: scope.manager,
     members,
     totals: {
-      prsMerged,
+      prsMerged: roundCredit(prsMerged),
       reviewsGiven,
       reposTouched: repoSet.size || scope.repos.length,
       issuesClosed: issueSet.size,

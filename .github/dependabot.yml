@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # Weekly npm updates — grouped so one PR bumps the whole dev toolchain
+  # together and releases don't get papered over with three-line drift PRs.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      toolchain:
+        patterns:
+          - "typescript"
+          - "eslint*"
+          - "typescript-eslint"
+          - "prettier"
+          - "tsx"
+          - "vitest"
+          - "@vitest/*"
+          - "fast-check"
+      octokit:
+        patterns:
+          - "@octokit/*"
+
+  # Pins the digest on node:24-alpine (or whatever the base becomes) fresh
+  # every week so a stale pin can't hide a known-CVE base image.
+  - package-ecosystem: docker
+    directory: "/docker"
+    schedule:
+      interval: weekly
+
+  # GitHub Actions by SHA pinning — same idea at the CI layer.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

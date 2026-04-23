@@ -42,11 +42,22 @@ describe("AuditLog", () => {
     state.close();
   });
 
-  it("verify() detects a tampered payload", async () => {
+  // Defense-in-depth: SQLite triggers reject UPDATE/DELETE at the storage
+  // layer. To simulate a raw-file-level attacker who bypassed the Node API
+  // AND was willing to re-create the DB, we drop the triggers before
+  // mutating in these tests. `verify()` must still catch the break.
+  const dropTriggers = (state: StateDB): void => {
+    state.db.exec(`
+      DROP TRIGGER IF EXISTS audit_log_no_update;
+      DROP TRIGGER IF EXISTS audit_log_no_delete;
+    `);
+  };
+
+  it("verify() detects a tampered payload (offline attack)", async () => {
     const { log, state } = await freshLog();
     log.append({ actor: "a", event: "run_started", target: "t" });
     log.append({ actor: "a", event: "run_completed", target: "t" });
-    // Direct DB mutation simulates an attacker editing the log.
+    dropTriggers(state);
     state.db.prepare(`UPDATE audit_log SET payload = '{"tampered":true}' WHERE seq = 1`).run();
     const res = log.verify();
     expect(res.ok).toBe(false);
@@ -54,11 +65,12 @@ describe("AuditLog", () => {
     state.close();
   });
 
-  it("verify() detects a deleted middle row", async () => {
+  it("verify() detects a deleted middle row (offline attack)", async () => {
     const { log, state } = await freshLog();
     log.append({ actor: "a", event: "run_started", target: "t" });
     log.append({ actor: "a", event: "report_written", target: "t" });
     log.append({ actor: "a", event: "run_completed", target: "t" });
+    dropTriggers(state);
     state.db.prepare(`DELETE FROM audit_log WHERE seq = 2`).run();
     const res = log.verify();
     expect(res.ok).toBe(false);
@@ -66,14 +78,32 @@ describe("AuditLog", () => {
     state.close();
   });
 
-  it("verify() detects a reordered row (swapped seq)", async () => {
+  it("verify() detects a reordered row (swapped seq) (offline attack)", async () => {
     const { log, state } = await freshLog();
     log.append({ actor: "a", event: "run_started", target: "t" });
     log.append({ actor: "a", event: "run_completed", target: "t" });
-    // Move row 1 after row 2 by assigning it a higher seq.
+    dropTriggers(state);
     state.db.prepare(`UPDATE audit_log SET seq = 99 WHERE seq = 1`).run();
     const res = log.verify();
     expect(res.ok).toBe(false);
+    state.close();
+  });
+
+  it("storage-layer trigger rejects UPDATE on audit_log", async () => {
+    const { log, state } = await freshLog();
+    log.append({ actor: "a", event: "run_started", target: "t" });
+    expect(() =>
+      state.db.prepare(`UPDATE audit_log SET payload = '{}' WHERE seq = 1`).run(),
+    ).toThrow(/append-only/);
+    state.close();
+  });
+
+  it("storage-layer trigger rejects DELETE on audit_log", async () => {
+    const { log, state } = await freshLog();
+    log.append({ actor: "a", event: "run_started", target: "t" });
+    expect(() =>
+      state.db.prepare(`DELETE FROM audit_log WHERE seq = 1`).run(),
+    ).toThrow(/append-only/);
     state.close();
   });
 

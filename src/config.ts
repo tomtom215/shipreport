@@ -4,6 +4,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { QuarterRange } from "./types.js";
+import { dateRangeToQuarter, quarterLabelToRange as tzQuarterLabelToRange } from "./tz.js";
 
 const QuarterLabel = z.string().regex(/^\d{4}Q[1-4]$/);
 
@@ -18,6 +19,9 @@ const Classification = z.object({
   infraLabels: z.array(z.string()).default(["ci", "build", "devops", "infra"]),
   docsLabels: z.array(z.string()).default(["docs", "documentation"]),
 });
+
+export const CO_AUTHOR_CREDIT = ["full", "split"] as const;
+const CoAuthorCredit = z.enum(CO_AUTHOR_CREDIT).default("full");
 
 const Output = z.object({
   dir: z.string().default("./out"),
@@ -67,11 +71,24 @@ const Team = z.object({
 const Audit = z.object({
   enabled: z.boolean().default(true),
   path: z.string().default("~/.local/share/shipreport/state.sqlite"),
+  signingKeyPath: z.string().default("~/.config/shipreport/audit-ed25519.pem"),
+  signer: z.string().default("shipreport"),
 });
 
 const Cache = z.object({
   path: z.string().default("~/.cache/shipreport/cache.sqlite"),
   ttlDays: z.number().int().positive().default(7),
+});
+
+const Extract = z.object({
+  /** Max concurrent per-repo GraphQL fetches (default 4). */
+  concurrency: z.number().int().positive().max(32).default(4),
+  /**
+   * GraphQL quota floor at which we degrade to serial work and extend
+   * backoff. Default 100 leaves a comfortable margin over the typical
+   * per-request cost (~1) while keeping a safety net for big extracts.
+   */
+  rateLimitThreshold: z.number().int().positive().default(100),
 });
 
 // Full (new) shape.
@@ -87,6 +104,7 @@ const MultiTeamShape = z.object({
     .object({
       quarter: z.union([QuarterLabel, DateRange]).optional(),
       timezone: z.string().default("UTC"),
+      coAuthorCredit: CoAuthorCredit,
       output: Output.default({
         dir: "./out",
         formats: ["md", "html"],
@@ -103,6 +121,7 @@ const MultiTeamShape = z.object({
     })
     .default({
       timezone: "UTC",
+      coAuthorCredit: "full",
       output: {
         dir: "./out",
         formats: ["md", "html"],
@@ -117,8 +136,14 @@ const MultiTeamShape = z.object({
         docsLabels: ["docs", "documentation"],
       },
     }),
-  audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
+  audit: Audit.default({
+    enabled: true,
+    path: "~/.local/share/shipreport/state.sqlite",
+    signingKeyPath: "~/.config/shipreport/audit-ed25519.pem",
+    signer: "shipreport",
+  }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
+  extract: Extract.default({ concurrency: 4, rateLimitThreshold: 100 }),
 });
 
 // Legacy (v0.1) single-team shape — still accepted; normalized to multi-team.
@@ -149,8 +174,14 @@ const LegacyShape = z.object({
     teamSummary: true,
     managerRollup: true,
   }),
-  audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
+  audit: Audit.default({
+    enabled: true,
+    path: "~/.local/share/shipreport/state.sqlite",
+    signingKeyPath: "~/.config/shipreport/audit-ed25519.pem",
+    signer: "shipreport",
+  }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
+  extract: Extract.default({ concurrency: 4, rateLimitThreshold: 100 }),
 });
 
 export type Config = z.infer<typeof MultiTeamShape>;
@@ -195,11 +226,13 @@ function legacyToMulti(l: z.infer<typeof LegacyShape>): Config {
     defaults: {
       quarter: l.quarter,
       timezone: l.timezone,
+      coAuthorCredit: "full",
       output: l.output,
       classification: l.classification,
     },
     audit: l.audit,
     cache: l.cache,
+    extract: { concurrency: 4, rateLimitThreshold: 100 },
   };
 }
 
@@ -216,21 +249,12 @@ export function resolveQuarter(
   tz: string,
 ): QuarterRange {
   if (!q) throw new Error("No quarter specified (team or defaults.quarter).");
-  if (typeof q === "string") return quarterLabelToRange(q, tz);
-  return { label: `${q.from}..${q.to}`, from: q.from, to: q.to };
+  if (typeof q === "string") return tzQuarterLabelToRange(q, tz);
+  return dateRangeToQuarter(q.from, q.to, tz);
 }
 
-export function quarterLabelToRange(label: string, _tz: string): QuarterRange {
-  const m = /^(\d{4})Q([1-4])$/.exec(label);
-  if (!m) throw new Error(`bad quarter label: ${label}`);
-  const year = Number(m[1]);
-  const qi = Number(m[2]);
-  const startMonth = (qi - 1) * 3;
-  const endMonth = startMonth + 3;
-  const from = new Date(Date.UTC(year, startMonth, 1)).toISOString().slice(0, 10);
-  const to = new Date(Date.UTC(year, endMonth, 0)).toISOString().slice(0, 10);
-  return { label, from, to };
-}
+// Re-export for callers that used the old name. Signature unchanged.
+export { quarterLabelToRange } from "./tz.js";
 
 export interface ResolvedTeam {
   name: string;
@@ -243,6 +267,7 @@ export interface ResolvedTeam {
   schedule: string | null;
   output: z.infer<typeof Output>;
   classification: z.infer<typeof Classification>;
+  coAuthorCredit: z.infer<typeof CoAuthorCredit>;
 }
 
 export function resolveTeam(cfg: Config, team: TeamConfig): ResolvedTeam {
@@ -264,6 +289,7 @@ export function resolveTeam(cfg: Config, team: TeamConfig): ResolvedTeam {
     schedule: team.schedule ?? null,
     output,
     classification,
+    coAuthorCredit: cfg.defaults.coAuthorCredit,
   };
 }
 

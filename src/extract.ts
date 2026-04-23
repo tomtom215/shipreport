@@ -1,8 +1,40 @@
+import { runConcurrent } from "./concurrency.js";
+import { ExtractCache, maxUpdatedAt, mergeByNumber } from "./extract-cache.js";
+import { coAuthorLoginFromEmail, parseCoAuthors } from "./pr-parse.js";
+import type { RunCounters } from "./counters.js";
 import type { GithubClient } from "./github.js";
+import type { RateLimitGuard } from "./rate-limit.js";
 import type { DataGap, QuarterRange, RawPR } from "./types.js";
 
 export interface ExtractScope {
   repos: string[];
+}
+
+export interface ExtractOptions {
+  /** Max concurrent repo fetches. Default 4. */
+  concurrency?: number;
+  /** When true: never touch the network. Cold cache → throw. */
+  dryRun?: boolean;
+  /** Counters bag; incremented in-place. */
+  counters?: RunCounters;
+  /** Cache handle for incremental extraction. Optional but strongly advised. */
+  cache?: ExtractCache;
+  /** Rate-limit guard shared with the github client. */
+  rateLimitGuard?: RateLimitGuard;
+  log?: (msg: string) => void;
+}
+
+export interface ExtractResult {
+  prsByRepo: Map<string, RawPR[]>;
+  gaps: DataGap[];
+  /** Default-branch-only filter dropped this many PRs (audit signal). */
+  droppedNonDefaultBranch: number;
+}
+
+interface ReviewNode {
+  author: { login: string } | null;
+  state: string;
+  comments: { totalCount: number };
 }
 
 interface PullsNode {
@@ -12,6 +44,8 @@ interface PullsNode {
   url: string;
   state: string;
   mergedAt: string | null;
+  updatedAt: string;
+  baseRefName: string;
   additions: number;
   deletions: number;
   changedFiles: number;
@@ -19,7 +53,8 @@ interface PullsNode {
   labels: { nodes: { name: string }[] };
   milestone: { title: string } | null;
   comments: { totalCount: number };
-  reviews: { nodes: { author: { login: string } | null; state: string }[] };
+  mergeCommit: { message: string | null } | null;
+  reviews: { nodes: ReviewNode[] };
   reviewRequests: {
     nodes: { requestedReviewer: { login?: string; name?: string } | null }[];
   };
@@ -36,7 +71,11 @@ interface PullsNode {
 
 const PR_QUERY = /* GraphQL */ `
   query ($owner: String!, $name: String!, $cursor: String) {
+    rateLimit {
+      remaining
+    }
     repository(owner: $owner, name: $name) {
+      defaultBranchRef { name }
       pullRequests(
         first: 50
         after: $cursor
@@ -54,6 +93,8 @@ const PR_QUERY = /* GraphQL */ `
           url
           state
           mergedAt
+          updatedAt
+          baseRefName
           additions
           deletions
           changedFiles
@@ -61,7 +102,14 @@ const PR_QUERY = /* GraphQL */ `
           labels(first: 20) { nodes { name } }
           milestone { title }
           comments { totalCount }
-          reviews(first: 50) { nodes { author { login } state } }
+          mergeCommit { message }
+          reviews(first: 50) {
+            nodes {
+              author { login }
+              state
+              comments { totalCount }
+            }
+          }
           reviewRequests(first: 20) {
             nodes {
               requestedReviewer {
@@ -85,87 +133,157 @@ const PR_QUERY = /* GraphQL */ `
   }
 `;
 
-export interface ExtractResult {
-  prsByRepo: Map<string, RawPR[]>;
-  gaps: DataGap[];
-}
-
 export async function extractAll(
   client: GithubClient,
   scope: ExtractScope,
   quarter: QuarterRange,
-  log: (msg: string) => void = () => {},
+  opts: ExtractOptions = {},
 ): Promise<ExtractResult> {
+  const log = opts.log ?? (() => {});
+  const concurrency = Math.max(1, opts.concurrency ?? 4);
   const prsByRepo = new Map<string, RawPR[]>();
   const gaps: DataGap[] = [];
+  let droppedNonDefaultBranch = 0;
 
-  const from = new Date(`${quarter.from}T00:00:00Z`).getTime();
-  const to = new Date(`${quarter.to}T23:59:59Z`).getTime();
-
-  for (const repoPath of scope.repos) {
+  const { stats } = await runConcurrent(scope.repos, concurrency, async (repoPath) => {
     const [owner, name] = repoPath.split("/") as [string, string];
     try {
-      const prs = await fetchRepoPRs(client, owner, name, from, to, log);
-      prsByRepo.set(repoPath, prs);
-      log(`${repoPath}: ${prs.length} merged PRs in window`);
+      const res = await fetchRepo(client, owner, name, quarter, opts, log);
+      prsByRepo.set(repoPath, res.prs);
+      droppedNonDefaultBranch += res.droppedNonDefault;
+      log(
+        `${repoPath}: ${res.prs.length} merged PRs on default branch (${res.droppedNonDefault} dropped: non-default base; ${res.cacheHits} from cache)`,
+      );
     } catch (err) {
+      // Dry-run is an explicit cache-only mode; any failure (cold cache,
+      // corrupt snapshot) must surface to the caller, not silently degrade.
+      if (opts.dryRun) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       log(`${repoPath}: failed (${msg}) — skipping`);
       gaps.push({ repo: repoPath, reason: msg, at: new Date().toISOString() });
       prsByRepo.set(repoPath, []);
     }
-  }
+  });
 
-  return { prsByRepo, gaps };
+  if (opts.counters) opts.counters.peakConcurrency = stats.peakConcurrency;
+
+  return { prsByRepo, gaps, droppedNonDefaultBranch };
 }
 
-async function fetchRepoPRs(
+interface RepoFetchResult {
+  prs: RawPR[];
+  droppedNonDefault: number;
+  cacheHits: number;
+}
+
+async function fetchRepo(
   client: GithubClient,
   owner: string,
   name: string,
-  fromMs: number,
-  toMs: number,
+  quarter: QuarterRange,
+  opts: ExtractOptions,
   log: (msg: string) => void,
-): Promise<RawPR[]> {
-  const out: RawPR[] = [];
-  let cursor: string | null = null;
-  let pages = 0;
+): Promise<RepoFetchResult> {
+  const repoPath = `${owner}/${name}`;
+  const cached = opts.cache?.load(repoPath, quarter) ?? null;
+
+  if (opts.dryRun) {
+    if (!cached) {
+      throw new Error(
+        `--dry-run set but no cached snapshot for ${repoPath} @ ${quarter.label}; run once without --dry-run to warm the cache.`,
+      );
+    }
+    if (opts.counters) opts.counters.cacheHits += cached.prs.length;
+    return { prs: cached.prs, droppedNonDefault: 0, cacheHits: cached.prs.length };
+  }
+
+  const lastSeen = cached?.lastSeenUpdatedAt ?? null;
+
+  // Resume from a leftover checkpoint if a previous run crashed mid-extract.
+  const checkpoint = opts.cache?.loadCheckpoint(repoPath, quarter) ?? null;
+  const freshPRs: RawPR[] = checkpoint ? [...checkpoint.partialPrs] : [];
+  let cursor: string | null = checkpoint?.cursor ?? null;
+  let pages = checkpoint?.pages ?? 0;
+  if (checkpoint) {
+    log(`${repoPath}: resuming from checkpoint (page ${pages}, ${freshPRs.length} PRs collected)`);
+  }
+
+  let droppedNonDefault = 0;
+  let defaultBranch = "main";
+  let caughtUp = false;
 
   for (;;) {
     pages += 1;
     const data: {
       repository: {
+        defaultBranchRef: { name: string } | null;
         pullRequests: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PullsNode[] };
       };
     } = await client.graphql(PR_QUERY, { owner, name, cursor });
 
+    defaultBranch = data.repository.defaultBranchRef?.name ?? defaultBranch;
     const nodes = data.repository.pullRequests.nodes ?? [];
     let sawOlder = false;
 
     for (const n of nodes) {
+      // Incremental: once a node's updatedAt is <= our lastSeen, everything
+      // that follows (sorted updatedAt DESC) is cached and unchanged. Stop.
+      if (lastSeen && n.updatedAt <= lastSeen) {
+        caughtUp = true;
+        break;
+      }
       if (!n.mergedAt) continue;
       const ts = new Date(n.mergedAt).getTime();
-      if (ts > toMs) continue;
-      if (ts < fromMs) {
+      if (ts > quarter.toTs) continue;
+      if (ts < quarter.fromTs) {
         sawOlder = true;
         continue;
       }
-      out.push(nodeToRaw(`${owner}/${name}`, n));
+      if (n.baseRefName !== defaultBranch) {
+        droppedNonDefault += 1;
+        continue;
+      }
+      freshPRs.push(nodeToRaw(repoPath, defaultBranch, n));
     }
 
-    // results are sorted by UPDATED_AT desc; we can stop once we've paginated
-    // past the window AND nothing recent matched.
-    if (!data.repository.pullRequests.pageInfo.hasNextPage) break;
-    if (sawOlder && out.length > 0 && oldestMerged(out) < fromMs) break;
+    const pageInfo = data.repository.pullRequests.pageInfo;
+    cursor = pageInfo.endCursor;
 
-    cursor = data.repository.pullRequests.pageInfo.endCursor;
+    // Persist a checkpoint after each successful page so a crash right
+    // after this write means the next run resumes from exactly here.
+    opts.cache?.saveCheckpoint(repoPath, quarter, {
+      cursor,
+      pages,
+      partialPrs: freshPRs,
+    });
+
+    if (caughtUp) break;
+    if (!pageInfo.hasNextPage) break;
+    if (sawOlder && freshPRs.length > 0 && oldestMerged(freshPRs) < quarter.fromTs) break;
+
     if (pages > 40) {
-      log(`${owner}/${name}: stopping at 40 pages (safety cap)`);
+      log(`${repoPath}: stopping at 40 pages (safety cap)`);
       break;
     }
   }
 
-  return out;
+  const cachedPrs = cached?.prs ?? [];
+  const merged = mergeByNumber(cachedPrs, freshPRs).filter((p) => {
+    if (!p.mergedAt) return false;
+    const ts = new Date(p.mergedAt).getTime();
+    return ts >= quarter.fromTs && ts <= quarter.toTs;
+  });
+
+  const lastSeenUpdated = maxUpdatedAt([...cachedPrs, ...freshPRs], lastSeen);
+  opts.cache?.save(repoPath, quarter, merged, lastSeenUpdated);
+  // Checkpoint's job is done — clear it so we don't resume an already-
+  // finished extract on the next run.
+  opts.cache?.clearCheckpoint(repoPath, quarter);
+
+  const cacheHits = Math.max(0, merged.length - freshPRs.length);
+  if (opts.counters) opts.counters.cacheHits += cacheHits;
+
+  return { prs: merged, droppedNonDefault, cacheHits };
 }
 
 function oldestMerged(prs: RawPR[]): number {
@@ -178,7 +296,11 @@ function oldestMerged(prs: RawPR[]): number {
   return min;
 }
 
-function nodeToRaw(repo: string, n: PullsNode): RawPR {
+function nodeToRaw(repo: string, defaultBranch: string, n: PullsNode): RawPR {
+  const coAuthors = parseCoAuthors(n.mergeCommit?.message ?? null)
+    .map((c) => coAuthorLoginFromEmail(c.email))
+    .filter((l): l is string => l !== null);
+
   return {
     repo,
     number: n.number,
@@ -187,12 +309,21 @@ function nodeToRaw(repo: string, n: PullsNode): RawPR {
     body: n.body ?? "",
     state: n.state,
     mergedAt: n.mergedAt,
+    updatedAt: n.updatedAt,
     author: n.author?.login ?? "ghost",
+    coAuthors,
+    baseRefName: n.baseRefName,
+    defaultBranch,
+    mergeCommitMessage: n.mergeCommit?.message ?? null,
     labels: (n.labels.nodes ?? []).map((l) => ({ name: l.name })),
     milestone: n.milestone ? { title: n.milestone.title } : null,
     reviews: (n.reviews.nodes ?? [])
       .filter((r) => r.author?.login)
-      .map((r) => ({ user: r.author!.login, state: r.state })),
+      .map((r) => ({
+        user: r.author!.login,
+        state: r.state,
+        inlineCommentCount: r.comments?.totalCount ?? 0,
+      })),
     comments: n.comments.totalCount,
     linkedIssues: (n.closingIssuesReferences.nodes ?? []).map((i) => ({
       repo: i.repository.nameWithOwner,
@@ -209,3 +340,6 @@ function nodeToRaw(repo: string, n: PullsNode): RawPR {
       .filter(Boolean),
   };
 }
+
+// Re-export for the ExtractCache interface surface used by run.ts.
+export { ExtractCache } from "./extract-cache.js";

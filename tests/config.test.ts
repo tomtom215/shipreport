@@ -112,19 +112,36 @@ describe("resolveTeam", () => {
 });
 
 describe("quarterLabelToRange", () => {
-  it("2026Q1 → Jan 1 .. Mar 31", () => {
-    expect(quarterLabelToRange("2026Q1", "UTC")).toEqual({
-      label: "2026Q1",
-      from: "2026-01-01",
-      to: "2026-03-31",
-    });
+  it("2026Q1 → Jan 1 .. Mar 31 in UTC", () => {
+    const r = quarterLabelToRange("2026Q1", "UTC");
+    expect(r.from).toBe("2026-01-01");
+    expect(r.to).toBe("2026-03-31");
+    expect(r.label).toBe("2026Q1");
+    expect(r.tz).toBe("UTC");
+    expect(new Date(r.fromTs).toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(new Date(r.toTs).toISOString()).toBe("2026-03-31T23:59:59.000Z");
   });
-  it("2026Q4 → Oct 1 .. Dec 31", () => {
-    expect(quarterLabelToRange("2026Q4", "UTC")).toEqual({
-      label: "2026Q4",
-      from: "2026-10-01",
-      to: "2026-12-31",
-    });
+  it("2026Q4 → Oct 1 .. Dec 31 in UTC", () => {
+    const r = quarterLabelToRange("2026Q4", "UTC");
+    expect(r.from).toBe("2026-10-01");
+    expect(r.to).toBe("2026-12-31");
+    expect(new Date(r.fromTs).toISOString()).toBe("2026-10-01T00:00:00.000Z");
+    expect(new Date(r.toTs).toISOString()).toBe("2026-12-31T23:59:59.000Z");
+  });
+  it("resolves wall-clock Q boundaries in a non-UTC zone (America/New_York)", () => {
+    const r = quarterLabelToRange("2026Q1", "America/New_York");
+    // Jan 1 00:00 EST = 05:00 UTC; Mar 31 23:59:59 EDT (DST active by then) = Apr 1 03:59:59 UTC.
+    expect(new Date(r.fromTs).toISOString()).toBe("2026-01-01T05:00:00.000Z");
+    expect(new Date(r.toTs).toISOString()).toBe("2026-04-01T03:59:59.000Z");
+  });
+  it("resolves Q4→Q1 year boundary in Pacific/Auckland (DST ends during Q1)", () => {
+    // Dec 31 2025 23:59:59 NZDT (+13) = Dec 31 10:59:59 UTC.
+    // Apr 1 (post-DST end) exhibits the DST-aware offset change.
+    const q4 = quarterLabelToRange("2025Q4", "Pacific/Auckland");
+    const q1 = quarterLabelToRange("2026Q1", "Pacific/Auckland");
+    expect(new Date(q4.toTs).toISOString()).toBe("2025-12-31T10:59:59.000Z");
+    // Q1 starts the millisecond after Q4 ends in the same zone.
+    expect(q1.fromTs - q4.toTs).toBe(1000);
   });
 });
 
@@ -136,5 +153,18 @@ describe("resolveQuarter", () => {
   });
   it("throws when no quarter given", () => {
     expect(() => resolveQuarter(undefined, "UTC")).toThrow();
+  });
+  it("honors timezone on explicit from/to ranges (America/New_York)", () => {
+    const r = resolveQuarter(
+      { from: "2026-02-15", to: "2026-05-15" },
+      "America/New_York",
+    );
+    // Start in EST (-05:00), end in EDT (-04:00); absolute timestamps reflect
+    // that offset change, so we can't assume 23:59:59 UTC.
+    expect(new Date(r.fromTs).toISOString()).toBe("2026-02-15T05:00:00.000Z");
+    expect(new Date(r.toTs).toISOString()).toBe("2026-05-16T03:59:59.000Z");
+  });
+  it("rejects a malformed quarter label", () => {
+    expect(() => resolveQuarter("foo" as never, "UTC")).toThrow();
   });
 });

@@ -1,11 +1,13 @@
 import { Cache } from "./cache.js";
-import { resolveAuth } from "./auth.js";
 import { AuditLog } from "./audit.js";
 import type { Config, TeamConfig } from "./config.js";
 import { resolveHome, resolveTeam } from "./config.js";
+import { createCounters, type RunCounters } from "./counters.js";
 import { discoverMembers } from "./discover.js";
-import { extractAll } from "./extract.js";
+import { ExtractCache, extractAll } from "./extract.js";
 import { makeClient } from "./github.js";
+import { RateLimitGuard } from "./rate-limit.js";
+import { tokenSourceFromConfig } from "./token-source.js";
 import {
   readPackageVersion,
   renderDev,
@@ -25,6 +27,10 @@ export interface RunOptions {
   log: (msg: string) => void;
   audit?: AuditLog;
   triggeredBy: "manual" | "schedule";
+  /** Override config.extract.concurrency for this run. */
+  concurrency?: number;
+  /** Skip network, read only from cache. Cold cache → runTeam throws. */
+  dryRun?: boolean;
 }
 
 export interface RunResult {
@@ -32,17 +38,28 @@ export interface RunResult {
   quarter: string;
   written: string[];
   gaps: { repo: string; reason: string }[];
+  counters: RunCounters;
 }
 
 export async function runTeam(opts: RunOptions): Promise<RunResult> {
   const { cfg, team, log } = opts;
-  const auth = await resolveAuth(cfg);
-  opts.audit?.append({
-    actor: auth.identity,
-    event: "token_resolved",
-    target: cfg.org,
-    payload: { kind: auth.kind },
-  });
+  const counters = createCounters();
+  const startedAt = Date.now();
+
+  // --dry-run never touches the network, so it never needs a resolved token.
+  // Otherwise, build a TokenSource that can renew mid-run for App auth.
+  const tokenSource = opts.dryRun
+    ? null
+    : await tokenSourceFromConfig(cfg);
+  const identity = tokenSource?.identity ?? "dry-run:local";
+  if (tokenSource) {
+    opts.audit?.append({
+      actor: identity,
+      event: "token_resolved",
+      target: cfg.org,
+      payload: { kind: tokenSource.kind },
+    });
+  }
 
   const teamCfg =
     opts.overrideQuarter !== undefined
@@ -50,30 +67,74 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       : team;
   const resolved = resolveTeam(cfg, teamCfg);
   const quarter = resolved.quarter;
+  const concurrency = opts.concurrency ?? cfg.extract.concurrency;
 
-  log(`team=${team.name} quarter=${quarter.label} (${quarter.from} → ${quarter.to})`);
+  log(
+    `team=${team.name} quarter=${quarter.label} (${quarter.from} → ${quarter.to}) concurrency=${concurrency}${opts.dryRun ? " dry-run" : ""}`,
+  );
   opts.audit?.append({
-    actor: auth.identity,
+    actor: identity,
     event: "run_started",
     target: `${cfg.org}/${team.name}`,
-    payload: { quarter: quarter.label, repos: team.repos, triggeredBy: opts.triggeredBy },
+    payload: {
+      quarter: quarter.label,
+      repos: team.repos,
+      triggeredBy: opts.triggeredBy,
+      concurrency,
+      dryRun: opts.dryRun === true,
+    },
   });
 
-  const cache = await Cache.open(resolveHome(cfg.cache.path), cfg.cache.ttlDays);
-  const client = makeClient({
-    token: auth.token,
-    baseUrl: cfg.github.baseUrl,
-    graphqlUrl: cfg.github.graphqlUrl,
-    log,
-    cache,
+  const cacheHandle = await Cache.open(resolveHome(cfg.cache.path), cfg.cache.ttlDays);
+  const extractCache = new ExtractCache(cacheHandle);
+
+  const rateLimitThreshold = cfg.extract.rateLimitThreshold;
+  const rateLimitGuard = new RateLimitGuard({
+    threshold: rateLimitThreshold,
+    onDegrade: (remaining) => {
+      log(
+        `rate limit remaining=${remaining} < threshold=${rateLimitThreshold}; degrading to serial`,
+      );
+      opts.audit?.append({
+        actor: identity,
+        event: "rate_limit_degraded",
+        target: `${cfg.org}/${team.name}`,
+        payload: { remaining, threshold: rateLimitThreshold },
+      });
+    },
   });
 
-  const { prsByRepo, gaps } = await extractAll(
-    client,
+  const client = tokenSource
+    ? makeClient({
+        tokenSource,
+        baseUrl: cfg.github.baseUrl,
+        graphqlUrl: cfg.github.graphqlUrl,
+        log,
+        cache: cacheHandle,
+        counters,
+        rateLimitGuard,
+      })
+    : null;
+
+  const { prsByRepo, gaps, droppedNonDefaultBranch } = await extractAll(
+    // In dry-run mode we never call graphql; a placeholder is safe.
+    (client ?? ({} as unknown as ReturnType<typeof makeClient>)),
     { repos: resolved.repos },
     quarter,
-    log,
+    {
+      concurrency,
+      dryRun: opts.dryRun,
+      counters,
+      cache: extractCache,
+      rateLimitGuard,
+      log,
+    },
   );
+  if (droppedNonDefaultBranch > 0) {
+    log(
+      `dropped ${droppedNonDefaultBranch} merged PR(s) whose base was not the default branch`,
+    );
+  }
 
   let members: string[];
   if (resolved.members) {
@@ -86,7 +147,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       `auto-discovered ${members.length} member(s) from ${discovery.considered} distinct author(s); skipped ${discovery.skippedBots.length} bot(s)`,
     );
     opts.audit?.append({
-      actor: auth.identity,
+      actor: identity,
       event: "members_discovered",
       target: `${cfg.org}/${team.name}`,
       payload: {
@@ -108,6 +169,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       members,
       repos: resolved.repos,
       classification: resolved.classification,
+      coAuthorCredit: resolved.coAuthorCredit,
     },
     quarter,
     prsByRepo,
@@ -156,24 +218,31 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     );
     written.push(...paths);
   }
-  cache.close();
+
+  // One cheap probe to capture remaining quota after the real work is done.
+  if (!opts.dryRun && client) counters.remainingRateLimit = await client.probeRemaining();
+  cacheHandle.close();
 
   for (const p of written) {
     opts.audit?.append({
-      actor: auth.identity,
+      actor: identity,
       event: "report_written",
       target: `${cfg.org}/${team.name}`,
       payload: { path: p },
     });
   }
+
+  counters.wallMs = Date.now() - startedAt;
   opts.audit?.append({
-    actor: auth.identity,
+    actor: identity,
     event: "run_completed",
     target: `${cfg.org}/${team.name}`,
     payload: {
       quarter: quarter.label,
       filesWritten: written.length,
       dataGaps: gaps.length,
+      droppedNonDefaultBranch,
+      counters,
     },
   });
 
@@ -182,6 +251,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     quarter: quarter.label,
     written,
     gaps: gaps.map((g) => ({ repo: g.repo, reason: g.reason })),
+    counters,
   };
 }
 

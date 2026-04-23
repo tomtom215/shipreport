@@ -26,27 +26,48 @@ jobs:
         with: { version: 10 }
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+      # This workflow is a template: operators fork the repo and drop in
+      # their own shipreport.yaml at the root. On the upstream mirror there
+      # is no such file, so scheduled runs must no-op cleanly rather than
+      # hard-fail every hour. hashFiles() returns '' for a missing path.
+      - name: Detect operator config
+        id: detect
+        run: |
+          if [ -f shipreport.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No shipreport.yaml at repo root — this workflow is a template; nothing to run."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Warn on manual dispatch without a config
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.detect.outputs.present != 'true' }}
+        run: |
+          echo "::warning title=No shipreport.yaml::You dispatched this workflow manually but no shipreport.yaml was found at the repo root. This file is operator-provided; see examples/shipreport.yaml for the expected shape."
+          exit 1
+
       # Restore the scheduler/audit state DB between runs. First run on a new
       # branch: cache miss → treated as "never run" and everything schedules.
       - uses: actions/cache@v4
+        if: steps.detect.outputs.present == 'true'
         with:
           path: ~/.local/share/shipreport
           key: shipreport-state-${{ github.ref_name }}
 
       - name: Scheduled tick
-        if: ${{ github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'schedule' && steps.detect.outputs.present == 'true' }}
         env:
           SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
           SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
         run: node bin/shipreport.js schedule tick --config shipreport.yaml --verbose
 
       - name: Manual run
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.detect.outputs.present == 'true' }}
         env:
           SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
           SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
@@ -63,7 +84,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && steps.detect.outputs.present == 'true' }}
         with:
           name: shipreport-${{ github.run_id }}
           path: out/
@@ -71,5 +92,5 @@ jobs:
           if-no-files-found: ignore
 
       - name: Audit tail
-        if: always()
+        if: ${{ always() && steps.detect.outputs.present == 'true' }}
         run: node bin/shipreport.js audit tail --config shipreport.yaml --limit 20 || true

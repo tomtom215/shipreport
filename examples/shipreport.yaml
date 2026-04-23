@@ -1,14 +1,31 @@
+# shipreport.yaml — annotated reference configuration.
+#
+# Every knob shipreport supports is shown here with its current default.
+# Delete anything you want the defaults for; only `org` and at least one
+# team with `repos` are truly required.
+#
+# Quick validation:
+#   shipreport doctor --config shipreport.yaml
+# Quick run, one team:
+#   shipreport run   --config shipreport.yaml --team checkout
+
+# ---------- GitHub connectivity ----------
 github:
+  # Override for GitHub Enterprise Server. Leave as defaults for github.com.
   baseUrl: https://api.github.com
   graphqlUrl: https://api.github.com/graphql
 
   # Option A — Fine-grained PAT via env var (simple, fine for smaller orgs).
+  # Scope: "Read-only" on contents, issues, pull requests, metadata, members.
   tokenEnv: SHIPREPORT_GITHUB_TOKEN
 
   # Option B — GitHub App (recommended for enterprise). Uncomment and supply
-  # either privateKeyEnv (PEM stuffed into an env var, \n-escaped) or
-  # privateKeyPath. installationId is optional — shipreport will look it up
-  # from the org if you omit it.
+  # either `privateKeyEnv` (PEM in an env var, with \n-escaped newlines) or
+  # `privateKeyPath`. `installationId` is optional; shipreport will look it
+  # up from the org when omitted.
+  #
+  # Long-running extracts automatically re-mint the installation token every
+  # 50 minutes, so runs that span many repos don't trip the 1-hour TTL.
   #
   # app:
   #   appId: 123456
@@ -18,9 +35,8 @@ github:
 
 org: acme-eng
 
-# One or more teams. Each team has its own members, repos, and (optionally)
-# schedule + output overrides. Scheduled runs are driven by `shipreport
-# schedule tick` — there is no daemon.
+# ---------- Teams ----------
+# One or more teams. Each can override any field in `defaults`.
 teams:
   - name: checkout
     manager: jdoe
@@ -28,7 +44,7 @@ teams:
     repos:
       - acme-eng/checkout-service
       - acme-eng/billing-api
-    schedule: "0 14 1 1,4,7,10 *"   # 14:00 UTC on the 1st of Jan/Apr/Jul/Oct
+    schedule: "0 14 1 1,4,7,10 *"   # 14:00 on Jan/Apr/Jul/Oct 1st
 
   - name: platform
     manager: kdoe
@@ -38,44 +54,73 @@ teams:
       - acme-eng/ci-tooling
     schedule: "0 14 1 1,4,7,10 *"
     output:
-      dir: ./out/platform        # per-team override
+      dir: ./out/platform           # per-team override
 
-  # Omit `members:` and shipreport auto-discovers them from merged-PR
-  # authors in the team's repos for the target quarter. Bots are filtered
-  # by default ([bot], -bot, -robot suffixes, plus dependabot/renovate/etc).
-  # Useful for open-source repos or any team where you'd rather not
-  # maintain a member list by hand.
+  # Omit `members:` and shipreport auto-discovers them from merged-PR authors
+  # in the team's repos for the target quarter. Bots are filtered by default
+  # ([bot], -bot, -robot suffixes, plus dependabot/renovate/etc). The
+  # discovered list is recorded in the audit log so the run is reproducible.
   - name: oss-contributors
     manager: kdoe
-    repos:
-      - acme-eng/public-sdk
+    repos: [acme-eng/public-sdk]
     autoMembers:
       limit: 10
       excludeBots: true
       excludeLogins: []
 
-# Defaults inherited by every team unless they override.
+# ---------- Defaults ----------
+# Inherited by every team unless overridden.
 defaults:
+  # Either a label or a date range. Labels are resolved in `timezone`, not UTC.
   quarter: 2026Q1
+  # quarter: { from: 2026-02-15, to: 2026-05-15 }
+
+  # IANA zone name. Used for quarter boundaries and any Intl-based formatting.
   timezone: America/New_York
+
+  # How PRs merged with Co-authored-by: trailers attribute credit:
+  #   full  — author and each co-author get +1 prsMerged, +files filesTouched
+  #   split — each contributor gets 1/N of the above
+  coAuthorCredit: full
+
   output:
     dir: ./out
-    formats: [md, html]         # add "pdf" to enable puppeteer
+    formats: [md, html]             # md, html, pdf, png (pdf/png need puppeteer)
     perDev: true
     teamSummary: true
     managerRollup: true
+
+  # Label-based PR classification. Conventional-commit titles are still used
+  # as a secondary signal when no label matches.
   classification:
     bugfixLabels: [bug, hotfix, p0, p1]
     featureLabels: [feature, enhancement]
     infraLabels: [ci, build, devops, infra]
     docsLabels: [docs, documentation]
 
-# SOC2-oriented append-only audit log, hash-chained for tamper-evidence.
-# Shares a SQLite DB with the scheduler's state.
+# ---------- SOC2-oriented audit log ----------
+# Hash-chained, append-only, enforced at both the Node and SQLite layers.
 audit:
   enabled: true
   path: ~/.local/share/shipreport/state.sqlite
+  # ed25519 key used by `audit snapshot`. Auto-generated at mode 0600 on
+  # first use if absent.
+  signingKeyPath: ~/.config/shipreport/audit-ed25519.pem
+  # Goes into the signed manifest; pick a human-meaningful identity.
+  signer: acme-compliance
 
+# ---------- HTTP + extract cache ----------
 cache:
   path: ~/.cache/shipreport/cache.sqlite
-  ttlDays: 7
+  ttlDays: 7   # sweep extract snapshots + checkpoints older than this
+
+# ---------- Extract tuning ----------
+extract:
+  # Max concurrent per-repo GraphQL fetches. 4 is a safe default even for
+  # orgs with hundreds of repos; push to 8–12 only if the GraphQL quota has
+  # plenty of headroom.
+  concurrency: 4
+  # When rateLimit.remaining drops below this floor, shipreport logs a
+  # `rate_limit_degraded` audit row and switches to serial fetches for the
+  # rest of the run.
+  rateLimitThreshold: 100
