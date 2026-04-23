@@ -3,7 +3,7 @@ import { loadConfig, resolveHome, selectTeams } from "./config.js";
 import { Cache } from "./cache.js";
 import { exportJsonl } from "./audit-export.js";
 import { makeClient, probeToken } from "./github.js";
-import { resolveAuth } from "./auth.js";
+import { tokenSourceFromConfig } from "./token-source.js";
 import { auditLogFor, openState, runTeam, scheduleStoreFor } from "./run.js";
 import { isDueSince, parseCron } from "./schedule.js";
 import { buildManifest, loadOrGenerateKey, signManifest } from "./sign.js";
@@ -390,16 +390,16 @@ const doctor = defineCommand({
   args: { config: { type: "string", required: true } },
   async run({ args }) {
     const cfg = await loadConfig(args.config);
-    const auth = await resolveAuth(cfg);
+    const tokenSource = await tokenSourceFromConfig(cfg);
     const client = makeClient({
-      token: auth.token,
+      tokenSource,
       baseUrl: cfg.github.baseUrl,
       graphqlUrl: cfg.github.graphqlUrl,
     });
     const info = await probeToken(client);
 
-    console.log(`Auth kind:        ${auth.kind}`);
-    console.log(`Identity:         ${auth.identity}`);
+    console.log(`Auth kind:        ${tokenSource.kind}`);
+    console.log(`Identity:         ${tokenSource.identity}`);
     console.log(`Authenticated as: ${info.login}`);
     console.log(
       `Token scopes:     ${info.scopes.join(", ") || "(fine-grained PAT or App installation)"}`,

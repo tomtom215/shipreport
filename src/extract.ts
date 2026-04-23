@@ -3,6 +3,7 @@ import { ExtractCache, maxUpdatedAt, mergeByNumber } from "./extract-cache.js";
 import { coAuthorLoginFromEmail, parseCoAuthors } from "./pr-parse.js";
 import type { RunCounters } from "./counters.js";
 import type { GithubClient } from "./github.js";
+import type { RateLimitGuard } from "./rate-limit.js";
 import type { DataGap, QuarterRange, RawPR } from "./types.js";
 
 export interface ExtractScope {
@@ -18,6 +19,8 @@ export interface ExtractOptions {
   counters?: RunCounters;
   /** Cache handle for incremental extraction. Optional but strongly advised. */
   cache?: ExtractCache;
+  /** Rate-limit guard shared with the github client. */
+  rateLimitGuard?: RateLimitGuard;
   log?: (msg: string) => void;
 }
 
@@ -68,6 +71,9 @@ interface PullsNode {
 
 const PR_QUERY = /* GraphQL */ `
   query ($owner: String!, $name: String!, $cursor: String) {
+    rateLimit {
+      remaining
+    }
     repository(owner: $owner, name: $name) {
       defaultBranchRef { name }
       pullRequests(
@@ -192,10 +198,17 @@ async function fetchRepo(
   }
 
   const lastSeen = cached?.lastSeenUpdatedAt ?? null;
-  const freshPRs: RawPR[] = [];
+
+  // Resume from a leftover checkpoint if a previous run crashed mid-extract.
+  const checkpoint = opts.cache?.loadCheckpoint(repoPath, quarter) ?? null;
+  const freshPRs: RawPR[] = checkpoint ? [...checkpoint.partialPrs] : [];
+  let cursor: string | null = checkpoint?.cursor ?? null;
+  let pages = checkpoint?.pages ?? 0;
+  if (checkpoint) {
+    log(`${repoPath}: resuming from checkpoint (page ${pages}, ${freshPRs.length} PRs collected)`);
+  }
+
   let droppedNonDefault = 0;
-  let cursor: string | null = null;
-  let pages = 0;
   let defaultBranch = "main";
   let caughtUp = false;
 
@@ -233,11 +246,21 @@ async function fetchRepo(
       freshPRs.push(nodeToRaw(repoPath, defaultBranch, n));
     }
 
+    const pageInfo = data.repository.pullRequests.pageInfo;
+    cursor = pageInfo.endCursor;
+
+    // Persist a checkpoint after each successful page so a crash right
+    // after this write means the next run resumes from exactly here.
+    opts.cache?.saveCheckpoint(repoPath, quarter, {
+      cursor,
+      pages,
+      partialPrs: freshPRs,
+    });
+
     if (caughtUp) break;
-    if (!data.repository.pullRequests.pageInfo.hasNextPage) break;
+    if (!pageInfo.hasNextPage) break;
     if (sawOlder && freshPRs.length > 0 && oldestMerged(freshPRs) < quarter.fromTs) break;
 
-    cursor = data.repository.pullRequests.pageInfo.endCursor;
     if (pages > 40) {
       log(`${repoPath}: stopping at 40 pages (safety cap)`);
       break;
@@ -246,9 +269,6 @@ async function fetchRepo(
 
   const cachedPrs = cached?.prs ?? [];
   const merged = mergeByNumber(cachedPrs, freshPRs).filter((p) => {
-    // Respect the current quarter window; a cached PR from a prior quarter
-    // cannot leak in since the cache key includes the label, but defensively
-    // re-apply the range here for correctness.
     if (!p.mergedAt) return false;
     const ts = new Date(p.mergedAt).getTime();
     return ts >= quarter.fromTs && ts <= quarter.toTs;
@@ -256,6 +276,9 @@ async function fetchRepo(
 
   const lastSeenUpdated = maxUpdatedAt([...cachedPrs, ...freshPRs], lastSeen);
   opts.cache?.save(repoPath, quarter, merged, lastSeenUpdated);
+  // Checkpoint's job is done — clear it so we don't resume an already-
+  // finished extract on the next run.
+  opts.cache?.clearCheckpoint(repoPath, quarter);
 
   const cacheHits = Math.max(0, merged.length - freshPRs.length);
   if (opts.counters) opts.counters.cacheHits += cacheHits;

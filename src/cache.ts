@@ -44,6 +44,17 @@ export class Cache {
         fetched_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_extract_fetched ON extract_snapshots(fetched_at);
+
+      -- Checkpoints are ephemeral — rows only exist while a pagination is
+      -- in progress or stalled by a failure. A completed extract deletes
+      -- its own checkpoint; a crashed extract leaves the row so the next
+      -- run can resume from the last successful page.
+      CREATE TABLE IF NOT EXISTS extract_checkpoints (
+        key TEXT PRIMARY KEY,
+        cursor TEXT,
+        partial_body TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
   }
 
@@ -86,6 +97,31 @@ export class Cache {
       .run(key, body, Date.now());
   }
 
+  getCheckpoint(
+    key: string,
+  ): { cursor: string | null; partialBody: string; updatedAt: number } | null {
+    const row = this.db
+      .prepare("SELECT cursor, partial_body, updated_at FROM extract_checkpoints WHERE key = ?")
+      .get(key) as
+      | { cursor: string | null; partial_body: string; updated_at: number }
+      | undefined;
+    if (!row) return null;
+    return { cursor: row.cursor, partialBody: row.partial_body, updatedAt: row.updated_at };
+  }
+
+  setCheckpoint(key: string, cursor: string | null, partialBody: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO extract_checkpoints(key, cursor, partial_body, updated_at) VALUES(?, ?, ?, ?) " +
+          "ON CONFLICT(key) DO UPDATE SET cursor = excluded.cursor, partial_body = excluded.partial_body, updated_at = excluded.updated_at",
+      )
+      .run(key, cursor, partialBody, Date.now());
+  }
+
+  clearCheckpoint(key: string): void {
+    this.db.prepare("DELETE FROM extract_checkpoints WHERE key = ?").run(key);
+  }
+
   isFresh(entry: { fetchedAt: number }): boolean {
     return Date.now() - entry.fetchedAt < this.ttlMs;
   }
@@ -96,7 +132,12 @@ export class Cache {
     const b = this.db
       .prepare("DELETE FROM extract_snapshots WHERE fetched_at < ?")
       .run(cutoff);
-    return Number(a.changes ?? 0) + Number(b.changes ?? 0);
+    // Checkpoints never go stale on a TTL basis — they're cleaned up on
+    // successful extract — but sweep ones older than TTL as a safety net.
+    const c = this.db
+      .prepare("DELETE FROM extract_checkpoints WHERE updated_at < ?")
+      .run(cutoff);
+    return Number(a.changes ?? 0) + Number(b.changes ?? 0) + Number(c.changes ?? 0);
   }
 
   close(): void {

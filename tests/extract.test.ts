@@ -261,6 +261,135 @@ describe("extractAll — dry-run", () => {
   });
 });
 
+describe("extractAll — checkpoint resume", () => {
+  let dir: string;
+  let cache: Cache;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "shipreport-extract-checkpoint-"));
+    cache = await Cache.open(path.join(dir, "c.sqlite"), 7);
+  });
+  afterEach(async () => {
+    cache.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("persists a checkpoint after each page; resumes from it after a failure", async () => {
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    const ec = new ExtractCache(cache);
+
+    // Two-page stub: first call returns page 1 (hasNextPage=true, 2 PRs),
+    // second call throws to simulate mid-extract failure.
+    const p1 = [
+      { number: 1, baseRefName: "main", mergedAt: "2026-02-20T00:00:00Z", updatedAt: "2026-02-20T00:00:00Z" },
+      { number: 2, baseRefName: "main", mergedAt: "2026-02-15T00:00:00Z", updatedAt: "2026-02-15T00:00:00Z" },
+    ];
+    let call = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failingClient: any = {
+      rest: {},
+      baseUrl: "",
+      async probeRemaining() {
+        return null;
+      },
+      async graphql() {
+        call += 1;
+        if (call === 1) {
+          return {
+            repository: {
+              defaultBranchRef: { name: "main" },
+              pullRequests: {
+                pageInfo: { hasNextPage: true, endCursor: "cursor-after-page-1" },
+                nodes: p1.map((n) => toNode(n)),
+              },
+            },
+          };
+        }
+        throw new Error("network interrupted");
+      },
+    };
+
+    await expect(
+      extractAll(failingClient, { repos: ["o/r"] }, q, { cache: ec }),
+    ).resolves.toMatchObject({ gaps: expect.arrayContaining([expect.any(Object)]) });
+
+    // The checkpoint persists after the first successful page.
+    const ckpt = ec.loadCheckpoint("o/r", q);
+    expect(ckpt).not.toBeNull();
+    expect(ckpt!.cursor).toBe("cursor-after-page-1");
+    expect(ckpt!.pages).toBe(1);
+    expect(ckpt!.partialPrs.map((p) => p.number)).toEqual([1, 2]);
+
+    // Now resume successfully: second page returns nothing new, end.
+    const p2 = [
+      { number: 3, baseRefName: "main", mergedAt: "2026-02-10T00:00:00Z", updatedAt: "2026-02-10T00:00:00Z" },
+    ];
+    let resumeCall = 0;
+    let seenCursor: string | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recoveringClient: any = {
+      rest: {},
+      baseUrl: "",
+      async probeRemaining() {
+        return null;
+      },
+      async graphql(_query: string, vars: Record<string, unknown>) {
+        resumeCall += 1;
+        seenCursor = vars.cursor as string | null;
+        return {
+          repository: {
+            defaultBranchRef: { name: "main" },
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: "end" },
+              nodes: p2.map((n) => toNode(n)),
+            },
+          },
+        };
+      },
+    };
+
+    const res = await extractAll(recoveringClient, { repos: ["o/r"] }, q, { cache: ec });
+    expect(res.prsByRepo.get("o/r")?.map((p) => p.number).sort()).toEqual([1, 2, 3]);
+    // On resume, the first GraphQL call uses the persisted cursor — proving
+    // we skipped page 1 rather than re-paginating from scratch.
+    expect(seenCursor).toBe("cursor-after-page-1");
+    expect(resumeCall).toBe(1);
+    // After a successful extract, the checkpoint is cleared.
+    expect(ec.loadCheckpoint("o/r", q)).toBeNull();
+  });
+});
+
+// Helper used by checkpoint-resume test: wraps a stub node into the full
+// PullsNode shape the production extractor expects.
+function toNode(n: {
+  number: number;
+  baseRefName: string;
+  mergedAt: string;
+  updatedAt: string;
+}): Record<string, unknown> {
+  return {
+    number: n.number,
+    title: "feat: thing",
+    body: "",
+    url: `https://example/${n.number}`,
+    state: "MERGED",
+    mergedAt: n.mergedAt,
+    updatedAt: n.updatedAt,
+    baseRefName: n.baseRefName,
+    additions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    author: { login: "alice" },
+    labels: { nodes: [] },
+    milestone: null,
+    comments: { totalCount: 0 },
+    mergeCommit: { message: null },
+    reviews: { nodes: [] },
+    reviewRequests: { nodes: [] },
+    closingIssuesReferences: { nodes: [] },
+  };
+}
+
 describe("extractAll — concurrency + counters", () => {
   it("reports peakConcurrency on counters (bounded by configured limit)", async () => {
     const q = quarterLabelToRange("2026Q1", "UTC");

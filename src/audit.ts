@@ -20,11 +20,14 @@ export type AuditEvent =
   | "run_completed"
   | "run_failed"
   | "token_resolved"
+  | "token_renewed"
   | "schedule_triggered"
   | "report_written"
   | "config_loaded"
   | "cache_pruned"
-  | "members_discovered";
+  | "members_discovered"
+  | "rate_limit_degraded"
+  | "extract_checkpointed";
 
 export interface AuditRow {
   seq: number;

@@ -30,6 +30,12 @@ export function snapshotKey(repo: string, quarter: QuarterRange): string {
   return `extract:${repo}:${quarter.label}:${quarter.tz}`;
 }
 
+export interface ExtractCheckpoint {
+  cursor: string | null;
+  pages: number;
+  partialPrs: RawPR[];
+}
+
 export class ExtractCache {
   constructor(private readonly cache: Cache) {}
 
@@ -60,6 +66,33 @@ export class ExtractCache {
       prs,
     };
     this.cache.setExtractSnapshot(snapshotKey(repo, quarter), JSON.stringify(snapshot));
+  }
+
+  loadCheckpoint(repo: string, quarter: QuarterRange): ExtractCheckpoint | null {
+    const row = this.cache.getCheckpoint(snapshotKey(repo, quarter));
+    if (!row) return null;
+    try {
+      const partial = JSON.parse(row.partialBody) as { pages: number; partialPrs: RawPR[] };
+      return { cursor: row.cursor, pages: partial.pages, partialPrs: partial.partialPrs };
+    } catch {
+      return null;
+    }
+  }
+
+  saveCheckpoint(
+    repo: string,
+    quarter: QuarterRange,
+    checkpoint: ExtractCheckpoint,
+  ): void {
+    this.cache.setCheckpoint(
+      snapshotKey(repo, quarter),
+      checkpoint.cursor,
+      JSON.stringify({ pages: checkpoint.pages, partialPrs: checkpoint.partialPrs }),
+    );
+  }
+
+  clearCheckpoint(repo: string, quarter: QuarterRange): void {
+    this.cache.clearCheckpoint(snapshotKey(repo, quarter));
   }
 }
 

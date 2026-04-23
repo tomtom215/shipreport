@@ -83,6 +83,12 @@ const Cache = z.object({
 const Extract = z.object({
   /** Max concurrent per-repo GraphQL fetches (default 4). */
   concurrency: z.number().int().positive().max(32).default(4),
+  /**
+   * GraphQL quota floor at which we degrade to serial work and extend
+   * backoff. Default 100 leaves a comfortable margin over the typical
+   * per-request cost (~1) while keeping a safety net for big extracts.
+   */
+  rateLimitThreshold: z.number().int().positive().default(100),
 });
 
 // Full (new) shape.
@@ -137,7 +143,7 @@ const MultiTeamShape = z.object({
     signer: "shipreport",
   }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
-  extract: Extract.default({ concurrency: 4 }),
+  extract: Extract.default({ concurrency: 4, rateLimitThreshold: 100 }),
 });
 
 // Legacy (v0.1) single-team shape — still accepted; normalized to multi-team.
@@ -175,7 +181,7 @@ const LegacyShape = z.object({
     signer: "shipreport",
   }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
-  extract: Extract.default({ concurrency: 4 }),
+  extract: Extract.default({ concurrency: 4, rateLimitThreshold: 100 }),
 });
 
 export type Config = z.infer<typeof MultiTeamShape>;
@@ -226,7 +232,7 @@ function legacyToMulti(l: z.infer<typeof LegacyShape>): Config {
     },
     audit: l.audit,
     cache: l.cache,
-    extract: { concurrency: 4 },
+    extract: { concurrency: 4, rateLimitThreshold: 100 },
   };
 }
 

@@ -1,5 +1,4 @@
 import { Cache } from "./cache.js";
-import { resolveAuth } from "./auth.js";
 import { AuditLog } from "./audit.js";
 import type { Config, TeamConfig } from "./config.js";
 import { resolveHome, resolveTeam } from "./config.js";
@@ -7,6 +6,8 @@ import { createCounters, type RunCounters } from "./counters.js";
 import { discoverMembers } from "./discover.js";
 import { ExtractCache, extractAll } from "./extract.js";
 import { makeClient } from "./github.js";
+import { RateLimitGuard } from "./rate-limit.js";
+import { tokenSourceFromConfig } from "./token-source.js";
 import {
   readPackageVersion,
   renderDev,
@@ -46,17 +47,17 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
   const startedAt = Date.now();
 
   // --dry-run never touches the network, so it never needs a resolved token.
-  // Use a placeholder actor identity so the audit trail still names the
-  // operation and any subsequent verify() call sees a well-formed chain.
-  const auth = opts.dryRun
-    ? { kind: "pat" as const, identity: "dry-run:local", token: "" }
-    : await resolveAuth(cfg);
-  if (!opts.dryRun) {
+  // Otherwise, build a TokenSource that can renew mid-run for App auth.
+  const tokenSource = opts.dryRun
+    ? null
+    : await tokenSourceFromConfig(cfg);
+  const identity = tokenSource?.identity ?? "dry-run:local";
+  if (tokenSource) {
     opts.audit?.append({
-      actor: auth.identity,
+      actor: identity,
       event: "token_resolved",
       target: cfg.org,
-      payload: { kind: auth.kind },
+      payload: { kind: tokenSource.kind },
     });
   }
 
@@ -72,7 +73,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     `team=${team.name} quarter=${quarter.label} (${quarter.from} → ${quarter.to}) concurrency=${concurrency}${opts.dryRun ? " dry-run" : ""}`,
   );
   opts.audit?.append({
-    actor: auth.identity,
+    actor: identity,
     event: "run_started",
     target: `${cfg.org}/${team.name}`,
     payload: {
@@ -86,20 +87,48 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
 
   const cacheHandle = await Cache.open(resolveHome(cfg.cache.path), cfg.cache.ttlDays);
   const extractCache = new ExtractCache(cacheHandle);
-  const client = makeClient({
-    token: auth.token,
-    baseUrl: cfg.github.baseUrl,
-    graphqlUrl: cfg.github.graphqlUrl,
-    log,
-    cache: cacheHandle,
-    counters,
+
+  const rateLimitThreshold = cfg.extract.rateLimitThreshold;
+  const rateLimitGuard = new RateLimitGuard({
+    threshold: rateLimitThreshold,
+    onDegrade: (remaining) => {
+      log(
+        `rate limit remaining=${remaining} < threshold=${rateLimitThreshold}; degrading to serial`,
+      );
+      opts.audit?.append({
+        actor: identity,
+        event: "rate_limit_degraded",
+        target: `${cfg.org}/${team.name}`,
+        payload: { remaining, threshold: rateLimitThreshold },
+      });
+    },
   });
 
+  const client = tokenSource
+    ? makeClient({
+        tokenSource,
+        baseUrl: cfg.github.baseUrl,
+        graphqlUrl: cfg.github.graphqlUrl,
+        log,
+        cache: cacheHandle,
+        counters,
+        rateLimitGuard,
+      })
+    : null;
+
   const { prsByRepo, gaps, droppedNonDefaultBranch } = await extractAll(
-    client,
+    // In dry-run mode we never call graphql; a placeholder is safe.
+    (client ?? ({} as unknown as ReturnType<typeof makeClient>)),
     { repos: resolved.repos },
     quarter,
-    { concurrency, dryRun: opts.dryRun, counters, cache: extractCache, log },
+    {
+      concurrency,
+      dryRun: opts.dryRun,
+      counters,
+      cache: extractCache,
+      rateLimitGuard,
+      log,
+    },
   );
   if (droppedNonDefaultBranch > 0) {
     log(
@@ -118,7 +147,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       `auto-discovered ${members.length} member(s) from ${discovery.considered} distinct author(s); skipped ${discovery.skippedBots.length} bot(s)`,
     );
     opts.audit?.append({
-      actor: auth.identity,
+      actor: identity,
       event: "members_discovered",
       target: `${cfg.org}/${team.name}`,
       payload: {
@@ -191,12 +220,12 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
   }
 
   // One cheap probe to capture remaining quota after the real work is done.
-  if (!opts.dryRun) counters.remainingRateLimit = await client.probeRemaining();
+  if (!opts.dryRun && client) counters.remainingRateLimit = await client.probeRemaining();
   cacheHandle.close();
 
   for (const p of written) {
     opts.audit?.append({
-      actor: auth.identity,
+      actor: identity,
       event: "report_written",
       target: `${cfg.org}/${team.name}`,
       payload: { path: p },
@@ -205,7 +234,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
 
   counters.wallMs = Date.now() - startedAt;
   opts.audit?.append({
-    actor: auth.identity,
+    actor: identity,
     event: "run_completed",
     target: `${cfg.org}/${team.name}`,
     payload: {

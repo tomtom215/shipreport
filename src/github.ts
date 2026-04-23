@@ -4,6 +4,8 @@ import { throttling } from "@octokit/plugin-throttling";
 import { graphql } from "@octokit/graphql";
 import type { Cache } from "./cache.js";
 import type { RunCounters } from "./counters.js";
+import type { RateLimitGuard } from "./rate-limit.js";
+import type { TokenSource } from "./token-source.js";
 
 const ShipOctokit = Octokit.plugin(retry, throttling);
 
@@ -12,59 +14,89 @@ export interface GithubClient {
   /** Counted GraphQL; increments counters.apiCalls on every call. */
   graphql: typeof graphql;
   baseUrl: string;
-  /**
-   * Fire a small GraphQL query to capture rateLimit.remaining. Cheap and
-   * opt-in: called once at end-of-run so the audit payload has an exact
-   * post-run quota reading.
-   */
   probeRemaining: () => Promise<number | null>;
 }
 
 export interface GithubOptions {
-  token: string;
+  /**
+   * Token source — called before each request. Supplied so that long-
+   * running App-backed runs can renew a stale installation token without
+   * having to rebuild the whole client.
+   */
+  tokenSource: TokenSource;
   baseUrl: string;
   graphqlUrl: string;
   userAgent?: string;
   log?: (msg: string) => void;
   cache?: Cache;
   counters?: RunCounters;
+  rateLimitGuard?: RateLimitGuard;
 }
 
 export function makeClient(opts: GithubOptions): GithubClient {
   const log = opts.log ?? (() => {});
   const counters = opts.counters;
+  const guard = opts.rateLimitGuard;
+  const ua = opts.userAgent ?? "shipreport/0.2";
+
+  // Rest Octokit captures its token at construction. Long-running App
+  // installations still get the fresh token because we update `auth`
+  // via Octokit's authStrategy hook — but shipreport almost never uses
+  // REST in hot paths, so we accept a small staleness window for REST.
   const rest = new ShipOctokit({
-    auth: opts.token,
+    auth: "placeholder",
+    authStrategy: () => ({
+      async hook(request: unknown, route: unknown, parameters?: unknown) {
+        const token = await opts.tokenSource.getToken();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyReq = request as any;
+        const params = (parameters ?? {}) as Record<string, unknown>;
+        return anyReq(route as string, { ...params, headers: { ...((params.headers as Record<string, string>) ?? {}), authorization: `token ${token}` } });
+      },
+    }),
     baseUrl: opts.baseUrl,
-    userAgent: opts.userAgent ?? "shipreport/0.2",
+    userAgent: ua,
     throttle: {
       onRateLimit: (retryAfter: number, info, _oct, retryCount: number) => {
         log(`rate limit hit on ${info.method} ${info.url}; sleeping ${retryAfter}s`);
         if (counters) counters.rateLimitSleepsMs += retryAfter * 1000;
-        return retryCount < 3;
+        // When degraded, allow more retries + longer back-off.
+        const max = guard?.isDegraded ? 6 : 3;
+        return retryCount < max;
       },
       onSecondaryRateLimit: (retryAfter: number, info, _oct, retryCount: number) => {
         log(`secondary rate limit on ${info.method} ${info.url}; sleeping ${retryAfter}s`);
         if (counters) counters.rateLimitSleepsMs += retryAfter * 1000;
-        return retryCount < 3;
+        const max = guard?.isDegraded ? 6 : 3;
+        return retryCount < max;
       },
     },
     retry: { doNotRetry: ["400", "401", "403", "404", "422"] },
   });
 
-  const rawGql = graphql.defaults({
-    baseUrl: opts.graphqlUrl.replace(/\/graphql$/, ""),
-    headers: {
-      authorization: `token ${opts.token}`,
-      "user-agent": opts.userAgent ?? "shipreport/0.2",
-    },
-  });
+  const graphqlBaseUrl = opts.graphqlUrl.replace(/\/graphql$/, "");
 
-  // Lightweight wrapper so we can audit call count without dragging counters
-  // into every callsite. Signature preserved so existing callers compile.
-  const gql = ((query: string, vars?: Record<string, unknown>) => {
+  // Re-build a graphql call on every invocation so the auth header always
+  // reflects the current token. Also observes rateLimit.remaining (when
+  // the query asks for it) to feed the guard + counters.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gql = (async (query: string, vars?: Record<string, unknown>): Promise<any> => {
+    const token = await opts.tokenSource.getToken();
+    const scoped = graphql.defaults({
+      baseUrl: graphqlBaseUrl,
+      headers: { authorization: `token ${token}`, "user-agent": ua },
+    });
     if (counters) counters.apiCalls += 1;
-    return rawGql(query, vars);
+    // Gate in degraded mode so only one call runs at a time.
+    const exec = async (): Promise<unknown> => scoped(query, vars);
+    const res = guard ? await guard.gate(exec) : await exec();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = (res as any)?.rateLimit?.remaining;
+    if (typeof r === "number") {
+      if (counters) counters.remainingRateLimit = r;
+      guard?.observe(r);
+    }
+    return res;
   }) as unknown as typeof graphql;
 
   return {
@@ -73,7 +105,7 @@ export function makeClient(opts: GithubOptions): GithubClient {
     baseUrl: opts.baseUrl,
     async probeRemaining(): Promise<number | null> {
       try {
-        const data = (await rawGql(
+        const data = (await gql(
           /* GraphQL */ `
             query {
               rateLimit {
@@ -82,7 +114,6 @@ export function makeClient(opts: GithubOptions): GithubClient {
             }
           `,
         )) as { rateLimit?: { remaining?: number } | null };
-        if (counters) counters.apiCalls += 1;
         return data.rateLimit?.remaining ?? null;
       } catch {
         return null;
