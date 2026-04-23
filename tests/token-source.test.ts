@@ -1,9 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
+import { normalize } from "../src/config.js";
 import {
   createAppTokenSource,
   createPatTokenSource,
   DEFAULT_RENEW_AFTER_MS,
+  tokenSourceFromConfig,
 } from "../src/token-source.js";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -112,5 +114,25 @@ describe("App token source — clock-mocked renewal", () => {
     expect(src.identity).toBe("app:9:install:99");
     const token = await src.getToken();
     expect(src.identity).not.toContain(token);
+  });
+});
+
+describe("tokenSourceFromConfig", () => {
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it("dispatches to PAT source when github.app is unset", async () => {
+    process.env.SHIPREPORT_FROM_CFG = "ghp_xxx";
+    const cfg = normalize({
+      github: { tokenEnv: "SHIPREPORT_FROM_CFG" },
+      org: "o",
+      teams: [{ name: "t", manager: "a", members: ["a"], repos: ["o/r"] }],
+      defaults: { quarter: "2026Q1" },
+    });
+    const src = await tokenSourceFromConfig(cfg);
+    expect(src.kind).toBe("pat");
+    expect(src.identity).toBe("pat:env:SHIPREPORT_FROM_CFG");
+    expect(await src.getToken()).toBe("ghp_xxx");
   });
 });

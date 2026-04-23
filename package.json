@@ -7,7 +7,7 @@
     "shipreport": "bin/shipreport.js"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   },
   "files": [
     "bin",
@@ -21,6 +21,7 @@
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "format": "prettier -w ."
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.7.5",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9.12.0",
     "fast-check": "^4.7.0",
     "nock": "^13.5.5",

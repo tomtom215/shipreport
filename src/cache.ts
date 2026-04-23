@@ -2,8 +2,9 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-// Node 22 built-in — no native deps. Loaded via createRequire so bundlers
-// (Vite/vitest) don't try to resolve "node:sqlite" at transform time.
+// Stable Node 24 built-in — no native deps. Loaded via createRequire so
+// bundlers (Vite/vitest) don't try to resolve "node:sqlite" at transform
+// time.
 const req = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const { DatabaseSync } = req("node:sqlite") as { DatabaseSync: any };

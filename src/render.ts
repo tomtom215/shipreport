@@ -170,6 +170,8 @@ export async function writeReport(
   return written;
 }
 
+/* c8 ignore start — optional puppeteer path requires Chrome at runtime;
+   exercised by the build-arg WITH_PDF=1 Docker smoke test, not unit tests. */
 async function launchChromium(): Promise<{
   browser: import("puppeteer").Browser;
   close: () => Promise<void>;
@@ -216,6 +218,7 @@ async function renderPng(html: string, outPath: string): Promise<void> {
     await close();
   }
 }
+/* c8 ignore stop */
 
 export async function readPackageVersion(): Promise<string> {
   try {

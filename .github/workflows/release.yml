@@ -1,0 +1,124 @@
+name: release
+
+# Triggered on vX.Y.Z tag push. Publishes:
+#   - npm package with provenance (sigstore via GitHub OIDC)
+#   - multi-arch (linux/amd64, linux/arm64) Docker image to GHCR
+#   - cosign keyless signature over the image digest (sigstore/OIDC)
+#   - SBOM (CycloneDX JSON) via syft, attached to the GitHub release
+#
+# Pre-publish gates: full test matrix (typecheck/lint/test/build) and a
+# fresh pnpm audit. Nothing ships until those pass.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write     # create GitHub release + upload assets
+  id-token: write     # OIDC for npm --provenance and cosign keyless
+  packages: write     # GHCR push
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test:coverage
+      - run: pnpm audit --prod --audit-level=high
+      - run: pnpm build
+
+  npm-publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Verify tag matches package.json version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
+      - name: Publish to npm with provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access public --provenance --no-git-checks
+
+  docker-publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Derive image tags
+        id: tags
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.version }}
+            ${{ steps.tags.outputs.image }}:latest
+          provenance: true
+          sbom: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Keyless-sign the image digest
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes \
+            "${{ steps.tags.outputs.image }}@${{ steps.build.outputs.digest }}"
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          syft \
+            "${{ steps.tags.outputs.image }}@${{ steps.build.outputs.digest }}" \
+            -o cyclonedx-json=shipreport-${{ steps.tags.outputs.version }}-sbom.cdx.json
+      - name: Attach SBOM to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: shipreport-*-sbom.cdx.json
+          body: |
+            ## shipreport v${{ steps.tags.outputs.version }}
+
+            - npm: published with `--provenance` (verifiable via `npm audit signatures`)
+            - container: `ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.version }}` (multi-arch: amd64, arm64)
+            - cosign: image digest signed keyless via Sigstore
+            - SBOM attached above (CycloneDX JSON)

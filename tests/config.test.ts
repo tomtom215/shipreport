@@ -154,4 +154,17 @@ describe("resolveQuarter", () => {
   it("throws when no quarter given", () => {
     expect(() => resolveQuarter(undefined, "UTC")).toThrow();
   });
+  it("honors timezone on explicit from/to ranges (America/New_York)", () => {
+    const r = resolveQuarter(
+      { from: "2026-02-15", to: "2026-05-15" },
+      "America/New_York",
+    );
+    // Start in EST (-05:00), end in EDT (-04:00); absolute timestamps reflect
+    // that offset change, so we can't assume 23:59:59 UTC.
+    expect(new Date(r.fromTs).toISOString()).toBe("2026-02-15T05:00:00.000Z");
+    expect(new Date(r.toTs).toISOString()).toBe("2026-05-16T03:59:59.000Z");
+  });
+  it("rejects a malformed quarter label", () => {
+    expect(() => resolveQuarter("foo" as never, "UTC")).toThrow();
+  });
 });

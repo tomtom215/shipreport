@@ -2,10 +2,12 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { AuditLog } from "../src/audit.js";
 import { Cache } from "../src/cache.js";
 import { normalize } from "../src/config.js";
 import { ExtractCache } from "../src/extract-cache.js";
-import { runTeam } from "../src/run.js";
+import { auditLogFor, openState, runTeam, scheduleStoreFor } from "../src/run.js";
+import { StateDB } from "../src/state.js";
 import { quarterLabelToRange } from "../src/tz.js";
 import type { RawPR } from "../src/types.js";
 
@@ -102,5 +104,140 @@ describe("runTeam — dry-run UX", () => {
       "utf8",
     );
     expect(md).toMatch(/alice — 2026Q2 Success Story/);
+  });
+
+  it("dry-run with audit enabled writes run_started + run_completed + report_written rows and the chain verifies", async () => {
+    const cache = await Cache.open(path.join(dir, "cache.sqlite"), 7);
+    const quarter = quarterLabelToRange("2026Q2", "UTC");
+    new ExtractCache(cache).save(
+      "o/r",
+      quarter,
+      [rawPR({ repo: "o/r", author: "alice" })],
+      "2026-04-12T12:00:00Z",
+    );
+    cache.close();
+
+    const cfg = normalize({
+      github: {},
+      org: "o",
+      teams: [
+        { name: "t", manager: "alice", members: ["alice"], repos: ["o/r"] },
+      ],
+      defaults: {
+        quarter: "2026Q2",
+        timezone: "UTC",
+        output: { dir: path.join(dir, "out"), formats: ["md"] },
+      },
+      audit: { enabled: true, path: path.join(dir, "state.sqlite") },
+      cache: { path: path.join(dir, "cache.sqlite"), ttlDays: 7 },
+    });
+
+    const state = (await openState(cfg))!;
+    const audit = auditLogFor(state);
+    const result = await runTeam({
+      cfg,
+      team: cfg.teams[0]!,
+      log: () => {},
+      audit,
+      triggeredBy: "manual",
+      dryRun: true,
+    });
+    state.close();
+
+    expect(result.counters.apiCalls).toBe(0);
+
+    const state2 = (await openState(cfg))!;
+    const audit2 = auditLogFor(state2);
+    const events = audit2.tail(100).map((r) => r.event);
+    expect(events).toContain("run_started");
+    expect(events).toContain("run_completed");
+    expect(events).toContain("report_written");
+    // chain integrity
+    expect(audit2.verify().ok).toBe(true);
+    state2.close();
+  });
+
+  it("auto-discovers members when `members` is omitted; audits members_discovered", async () => {
+    const cache = await Cache.open(path.join(dir, "cache.sqlite"), 7);
+    const quarter = quarterLabelToRange("2026Q2", "UTC");
+    new ExtractCache(cache).save(
+      "o/r",
+      quarter,
+      [
+        rawPR({ repo: "o/r", author: "alice", number: 1 }),
+        rawPR({ repo: "o/r", author: "alice", number: 2 }),
+        rawPR({ repo: "o/r", author: "bob", number: 3 }),
+      ],
+      "2026-04-12T12:00:00Z",
+    );
+    cache.close();
+
+    const cfg = normalize({
+      github: {},
+      org: "o",
+      teams: [
+        // `members` omitted → auto-discover.
+        { name: "t", manager: "alice", repos: ["o/r"] },
+      ],
+      defaults: {
+        quarter: "2026Q2",
+        timezone: "UTC",
+        output: { dir: path.join(dir, "out"), formats: ["md"] },
+      },
+      audit: { enabled: true, path: path.join(dir, "state.sqlite") },
+      cache: { path: path.join(dir, "cache.sqlite"), ttlDays: 7 },
+    });
+
+    const state = (await openState(cfg))!;
+    const audit = auditLogFor(state);
+    await runTeam({
+      cfg,
+      team: cfg.teams[0]!,
+      log: () => {},
+      audit,
+      triggeredBy: "manual",
+      dryRun: true,
+    });
+    state.close();
+
+    const state2 = (await openState(cfg))!;
+    const audit2 = auditLogFor(state2);
+    const md = audit2.tail(100).find((r) => r.event === "members_discovered");
+    state2.close();
+    expect(md).toBeDefined();
+    const payload = md!.payload as { members: string[] };
+    expect(payload.members).toEqual(["alice", "bob"]);
+  });
+});
+
+describe("run.ts helper exports", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "shipreport-run-helpers-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("openState returns null when audit.enabled is false", async () => {
+    const cfg = normalize({
+      github: {},
+      org: "o",
+      teams: [{ name: "t", manager: "a", members: ["a"], repos: ["o/r"] }],
+      defaults: { quarter: "2026Q1" },
+      audit: { enabled: false, path: path.join(dir, "state.sqlite") },
+    });
+    expect(await openState(cfg)).toBeNull();
+  });
+
+  it("scheduleStoreFor and auditLogFor wrap a StateDB", async () => {
+    const state = await StateDB.open(path.join(dir, "state.sqlite"));
+    try {
+      expect(scheduleStoreFor(state)).toBeDefined();
+      expect(auditLogFor(state)).toBeInstanceOf(AuditLog);
+    } finally {
+      state.close();
+    }
   });
 });

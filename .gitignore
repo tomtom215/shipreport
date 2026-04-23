@@ -7,3 +7,4 @@ dist/
 out/
 coverage/
 .vitest-cache/
+actionlint
