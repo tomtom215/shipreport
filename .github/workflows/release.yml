@@ -112,7 +112,7 @@ jobs:
             "${{ steps.tags.outputs.image }}@${{ steps.build.outputs.digest }}" \
             -o cyclonedx-json=shipreport-${{ steps.tags.outputs.version }}-sbom.cdx.json
       - name: Attach SBOM to the GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: shipreport-*-sbom.cdx.json
           body: |
