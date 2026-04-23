@@ -40,6 +40,22 @@ export class StateDB {
       CREATE INDEX IF NOT EXISTS idx_audit_at    ON audit_log(at);
       CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event);
 
+      -- Defense-in-depth: the Node-level API never mutates existing rows,
+      -- but an operator with DB-file access could still UPDATE/DELETE via
+      -- raw SQL. These triggers raise at the storage layer so the invariant
+      -- holds even if the Node process is bypassed entirely.
+      CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+      BEFORE UPDATE ON audit_log
+      BEGIN
+        SELECT RAISE(ABORT, 'audit_log is append-only (UPDATE rejected)');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+      BEFORE DELETE ON audit_log
+      BEGIN
+        SELECT RAISE(ABORT, 'audit_log is append-only (DELETE rejected)');
+      END;
+
       CREATE TABLE IF NOT EXISTS schedule_state (
         team          TEXT PRIMARY KEY,
         last_run_at   TEXT NOT NULL,

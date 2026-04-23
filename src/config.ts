@@ -71,6 +71,8 @@ const Team = z.object({
 const Audit = z.object({
   enabled: z.boolean().default(true),
   path: z.string().default("~/.local/share/shipreport/state.sqlite"),
+  signingKeyPath: z.string().default("~/.config/shipreport/audit-ed25519.pem"),
+  signer: z.string().default("shipreport"),
 });
 
 const Cache = z.object({
@@ -128,7 +130,12 @@ const MultiTeamShape = z.object({
         docsLabels: ["docs", "documentation"],
       },
     }),
-  audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
+  audit: Audit.default({
+    enabled: true,
+    path: "~/.local/share/shipreport/state.sqlite",
+    signingKeyPath: "~/.config/shipreport/audit-ed25519.pem",
+    signer: "shipreport",
+  }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
   extract: Extract.default({ concurrency: 4 }),
 });
@@ -161,7 +168,12 @@ const LegacyShape = z.object({
     teamSummary: true,
     managerRollup: true,
   }),
-  audit: Audit.default({ enabled: true, path: "~/.local/share/shipreport/state.sqlite" }),
+  audit: Audit.default({
+    enabled: true,
+    path: "~/.local/share/shipreport/state.sqlite",
+    signingKeyPath: "~/.config/shipreport/audit-ed25519.pem",
+    signer: "shipreport",
+  }),
   cache: Cache.default({ path: "~/.cache/shipreport/cache.sqlite", ttlDays: 7 }),
   extract: Extract.default({ concurrency: 4 }),
 });

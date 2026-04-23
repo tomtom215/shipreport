@@ -65,6 +65,8 @@ shipreport schedule tick --force          # run every scheduled team
 shipreport audit tail --limit 100         # recent audit events
 shipreport audit tail --since 2026-04-01 --json
 shipreport audit verify                   # check the hash chain
+shipreport audit export --since 2026-04-01 --format jsonl > audit.jsonl
+shipreport audit snapshot > snapshot.json  # signed chain-head manifest
 
 shipreport cache prune
 shipreport doctor
@@ -218,6 +220,51 @@ metrics stack.
 The DB is local by default. For centralized evidence, ship the SQLite file to
 your compliance bucket on a schedule, or periodically run
 `shipreport audit tail --json` and ship the output.
+
+### Defense-in-depth
+
+Two layers enforce the append-only invariant:
+
+1. **Node layer.** The `AuditLog` class exposes only `append()`, `tail()`,
+   `readForward()`, `verify()`, and `head()`. No UPDATE or DELETE path.
+2. **Storage layer.** SQLite `BEFORE UPDATE` and `BEFORE DELETE` triggers on
+   `audit_log` `RAISE(ABORT)` with a clear message. Even an operator with
+   direct DB access can't mutate a row through standard SQL.
+
+### Streaming evidence
+
+`audit export --since <ISO> --format jsonl` emits one row per line, in
+chain order, including both `prev_hash` and `hash`. A downstream verifier
+can replay the file with nothing but the genesis zero hash and detect any
+subsequent tampering.
+
+### External anchoring
+
+`audit snapshot` produces a signed JSON document:
+
+```json
+{
+  "manifest": {
+    "chainHeadSeq": 1248,
+    "chainHeadHash": "ab12…",
+    "generatedAt": "2026-04-23T12:00:00.000Z",
+    "signer": "acme-compliance"
+  },
+  "manifestCanonical": "{\"chainHeadHash\":\"ab12…\",…}",
+  "signature": "base64-ed25519…",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n…"
+}
+```
+
+Anchor it anywhere outside the host running shipreport (git, an S3 Object
+Lock bucket, a transparency log). Any later attempt to lop rows off the
+tail of the audit log is caught: the snapshot's `chainHeadSeq` / `chainHeadHash`
+won't match, and the signature proves the snapshot itself is authentic.
+
+The signing key lives at `audit.signingKeyPath` (default
+`~/.config/shipreport/audit-ed25519.pem`). If missing, shipreport generates
+one with mode 0600 on first `audit snapshot` invocation — rotate it with
+standard OpenSSL/gpg tooling.
 
 ---
 

@@ -1,10 +1,12 @@
 import { defineCommand, runMain } from "citty";
 import { loadConfig, resolveHome, selectTeams } from "./config.js";
 import { Cache } from "./cache.js";
+import { exportJsonl } from "./audit-export.js";
 import { makeClient, probeToken } from "./github.js";
 import { resolveAuth } from "./auth.js";
 import { auditLogFor, openState, runTeam, scheduleStoreFor } from "./run.js";
 import { isDueSince, parseCron } from "./schedule.js";
+import { buildManifest, loadOrGenerateKey, signManifest } from "./sign.js";
 
 function logger(verbose: boolean) {
   return (msg: string): void => {
@@ -274,9 +276,83 @@ const auditVerify = defineCommand({
   },
 });
 
+const auditExport = defineCommand({
+  meta: {
+    name: "export",
+    description:
+      "Emit audit rows as JSONL (one row per line) for shipment to a WORM store.",
+  },
+  args: {
+    config: { type: "string", required: true },
+    since: { type: "string", description: "ISO date/time lower bound (inclusive)" },
+    format: { type: "string", default: "jsonl", description: "Output format (jsonl)" },
+  },
+  async run({ args }) {
+    if (args.format !== "jsonl") {
+      console.error(`Unsupported format '${args.format}'. Only 'jsonl' is supported.`);
+      process.exit(2);
+    }
+    const cfg = await loadConfig(args.config);
+    const state = await openState(cfg);
+    if (!state) {
+      console.error("audit.enabled: false");
+      process.exit(2);
+    }
+    const audit = auditLogFor(state);
+    const rows = audit.readForward(args.since);
+    process.stdout.write(exportJsonl(rows));
+    state.close();
+  },
+});
+
+const auditSnapshot = defineCommand({
+  meta: {
+    name: "snapshot",
+    description:
+      "Produce a signed (ed25519) manifest of the current audit chain head for external anchoring.",
+  },
+  args: {
+    config: { type: "string", required: true },
+    signKey: {
+      type: "string",
+      description:
+        "Path to an ed25519 private key (PEM). Generated on first run if missing.",
+    },
+    signer: { type: "string", description: "Override config.audit.signer" },
+  },
+  async run({ args }) {
+    const cfg = await loadConfig(args.config);
+    const state = await openState(cfg);
+    if (!state) {
+      console.error("audit.enabled: false");
+      process.exit(2);
+    }
+    const audit = auditLogFor(state);
+    const head = audit.head();
+    const keyPath = resolveHome(args.signKey ?? cfg.audit.signingKeyPath);
+    const { privateKey, generated } = await loadOrGenerateKey(keyPath);
+    if (generated) {
+      console.error(`Generated new signing key at ${keyPath} (mode 0600).`);
+    }
+    const manifest = buildManifest({
+      chainHead: head,
+      generatedAt: new Date().toISOString(),
+      signer: args.signer ?? cfg.audit.signer,
+    });
+    const signed = signManifest(manifest, privateKey);
+    state.close();
+    process.stdout.write(JSON.stringify(signed, null, 2) + "\n");
+  },
+});
+
 const auditCmd = defineCommand({
   meta: { name: "audit", description: "Audit log operations." },
-  subCommands: { tail: auditTail, verify: auditVerify },
+  subCommands: {
+    tail: auditTail,
+    verify: auditVerify,
+    export: auditExport,
+    snapshot: auditSnapshot,
+  },
 });
 
 const cachePrune = defineCommand({
