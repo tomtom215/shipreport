@@ -45,13 +45,20 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
   const counters = createCounters();
   const startedAt = Date.now();
 
-  const auth = await resolveAuth(cfg);
-  opts.audit?.append({
-    actor: auth.identity,
-    event: "token_resolved",
-    target: cfg.org,
-    payload: { kind: auth.kind },
-  });
+  // --dry-run never touches the network, so it never needs a resolved token.
+  // Use a placeholder actor identity so the audit trail still names the
+  // operation and any subsequent verify() call sees a well-formed chain.
+  const auth = opts.dryRun
+    ? { kind: "pat" as const, identity: "dry-run:local", token: "" }
+    : await resolveAuth(cfg);
+  if (!opts.dryRun) {
+    opts.audit?.append({
+      actor: auth.identity,
+      event: "token_resolved",
+      target: cfg.org,
+      payload: { kind: auth.kind },
+    });
+  }
 
   const teamCfg =
     opts.overrideQuarter !== undefined
