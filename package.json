@@ -32,7 +32,7 @@
     "@octokit/plugin-retry": "^7.1.2",
     "@octokit/plugin-throttling": "^9.3.2",
     "@octokit/rest": "^21.0.2",
-    "citty": "^0.1.6",
+    "citty": "^0.2.2",
     "eta": "^3.5.0",
     "markdown-it": "^14.1.0",
     "yaml": "^2.5.1",
