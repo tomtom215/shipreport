@@ -1,8 +1,15 @@
+import { coAuthorLoginFromEmail, parseCoAuthors } from "./pr-parse.js";
 import type { GithubClient } from "./github.js";
 import type { DataGap, QuarterRange, RawPR } from "./types.js";
 
 export interface ExtractScope {
   repos: string[];
+}
+
+interface ReviewNode {
+  author: { login: string } | null;
+  state: string;
+  comments: { totalCount: number };
 }
 
 interface PullsNode {
@@ -12,6 +19,7 @@ interface PullsNode {
   url: string;
   state: string;
   mergedAt: string | null;
+  baseRefName: string;
   additions: number;
   deletions: number;
   changedFiles: number;
@@ -19,7 +27,8 @@ interface PullsNode {
   labels: { nodes: { name: string }[] };
   milestone: { title: string } | null;
   comments: { totalCount: number };
-  reviews: { nodes: { author: { login: string } | null; state: string }[] };
+  mergeCommit: { message: string | null } | null;
+  reviews: { nodes: ReviewNode[] };
   reviewRequests: {
     nodes: { requestedReviewer: { login?: string; name?: string } | null }[];
   };
@@ -37,6 +46,7 @@ interface PullsNode {
 const PR_QUERY = /* GraphQL */ `
   query ($owner: String!, $name: String!, $cursor: String) {
     repository(owner: $owner, name: $name) {
+      defaultBranchRef { name }
       pullRequests(
         first: 50
         after: $cursor
@@ -54,6 +64,7 @@ const PR_QUERY = /* GraphQL */ `
           url
           state
           mergedAt
+          baseRefName
           additions
           deletions
           changedFiles
@@ -61,7 +72,14 @@ const PR_QUERY = /* GraphQL */ `
           labels(first: 20) { nodes { name } }
           milestone { title }
           comments { totalCount }
-          reviews(first: 50) { nodes { author { login } state } }
+          mergeCommit { message }
+          reviews(first: 50) {
+            nodes {
+              author { login }
+              state
+              comments { totalCount }
+            }
+          }
           reviewRequests(first: 20) {
             nodes {
               requestedReviewer {
@@ -88,6 +106,8 @@ const PR_QUERY = /* GraphQL */ `
 export interface ExtractResult {
   prsByRepo: Map<string, RawPR[]>;
   gaps: DataGap[];
+  /** Default-branch-only filter dropped this many PRs (audit signal). */
+  droppedNonDefaultBranch: number;
 }
 
 export async function extractAll(
@@ -98,16 +118,17 @@ export async function extractAll(
 ): Promise<ExtractResult> {
   const prsByRepo = new Map<string, RawPR[]>();
   const gaps: DataGap[] = [];
-
-  const from = new Date(`${quarter.from}T00:00:00Z`).getTime();
-  const to = new Date(`${quarter.to}T23:59:59Z`).getTime();
+  let droppedNonDefaultBranch = 0;
 
   for (const repoPath of scope.repos) {
     const [owner, name] = repoPath.split("/") as [string, string];
     try {
-      const prs = await fetchRepoPRs(client, owner, name, from, to, log);
-      prsByRepo.set(repoPath, prs);
-      log(`${repoPath}: ${prs.length} merged PRs in window`);
+      const res = await fetchRepoPRs(client, owner, name, quarter, log);
+      prsByRepo.set(repoPath, res.prs);
+      droppedNonDefaultBranch += res.droppedNonDefault;
+      log(
+        `${repoPath}: ${res.prs.length} merged PRs on default branch (${res.droppedNonDefault} dropped: non-default base)`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`${repoPath}: failed (${msg}) — skipping`);
@@ -116,47 +137,59 @@ export async function extractAll(
     }
   }
 
-  return { prsByRepo, gaps };
+  return { prsByRepo, gaps, droppedNonDefaultBranch };
+}
+
+interface RepoFetchResult {
+  prs: RawPR[];
+  droppedNonDefault: number;
 }
 
 async function fetchRepoPRs(
   client: GithubClient,
   owner: string,
   name: string,
-  fromMs: number,
-  toMs: number,
+  quarter: QuarterRange,
   log: (msg: string) => void,
-): Promise<RawPR[]> {
+): Promise<RepoFetchResult> {
   const out: RawPR[] = [];
+  let droppedNonDefault = 0;
   let cursor: string | null = null;
   let pages = 0;
+  let defaultBranch = "main";
 
   for (;;) {
     pages += 1;
     const data: {
       repository: {
+        defaultBranchRef: { name: string } | null;
         pullRequests: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: PullsNode[] };
       };
     } = await client.graphql(PR_QUERY, { owner, name, cursor });
 
+    defaultBranch = data.repository.defaultBranchRef?.name ?? defaultBranch;
     const nodes = data.repository.pullRequests.nodes ?? [];
     let sawOlder = false;
 
     for (const n of nodes) {
       if (!n.mergedAt) continue;
       const ts = new Date(n.mergedAt).getTime();
-      if (ts > toMs) continue;
-      if (ts < fromMs) {
+      if (ts > quarter.toTs) continue;
+      if (ts < quarter.fromTs) {
         sawOlder = true;
         continue;
       }
-      out.push(nodeToRaw(`${owner}/${name}`, n));
+      if (n.baseRefName !== defaultBranch) {
+        droppedNonDefault += 1;
+        continue;
+      }
+      out.push(nodeToRaw(`${owner}/${name}`, defaultBranch, n));
     }
 
     // results are sorted by UPDATED_AT desc; we can stop once we've paginated
     // past the window AND nothing recent matched.
     if (!data.repository.pullRequests.pageInfo.hasNextPage) break;
-    if (sawOlder && out.length > 0 && oldestMerged(out) < fromMs) break;
+    if (sawOlder && out.length > 0 && oldestMerged(out) < quarter.fromTs) break;
 
     cursor = data.repository.pullRequests.pageInfo.endCursor;
     if (pages > 40) {
@@ -165,7 +198,7 @@ async function fetchRepoPRs(
     }
   }
 
-  return out;
+  return { prs: out, droppedNonDefault };
 }
 
 function oldestMerged(prs: RawPR[]): number {
@@ -178,7 +211,11 @@ function oldestMerged(prs: RawPR[]): number {
   return min;
 }
 
-function nodeToRaw(repo: string, n: PullsNode): RawPR {
+function nodeToRaw(repo: string, defaultBranch: string, n: PullsNode): RawPR {
+  const coAuthors = parseCoAuthors(n.mergeCommit?.message ?? null)
+    .map((c) => coAuthorLoginFromEmail(c.email))
+    .filter((l): l is string => l !== null);
+
   return {
     repo,
     number: n.number,
@@ -188,11 +225,19 @@ function nodeToRaw(repo: string, n: PullsNode): RawPR {
     state: n.state,
     mergedAt: n.mergedAt,
     author: n.author?.login ?? "ghost",
+    coAuthors,
+    baseRefName: n.baseRefName,
+    defaultBranch,
+    mergeCommitMessage: n.mergeCommit?.message ?? null,
     labels: (n.labels.nodes ?? []).map((l) => ({ name: l.name })),
     milestone: n.milestone ? { title: n.milestone.title } : null,
     reviews: (n.reviews.nodes ?? [])
       .filter((r) => r.author?.login)
-      .map((r) => ({ user: r.author!.login, state: r.state })),
+      .map((r) => ({
+        user: r.author!.login,
+        state: r.state,
+        inlineCommentCount: r.comments?.totalCount ?? 0,
+      })),
     comments: n.comments.totalCount,
     linkedIssues: (n.closingIssuesReferences.nodes ?? []).map((i) => ({
       repo: i.repository.nameWithOwner,

@@ -68,12 +68,17 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     cache,
   });
 
-  const { prsByRepo, gaps } = await extractAll(
+  const { prsByRepo, gaps, droppedNonDefaultBranch } = await extractAll(
     client,
     { repos: resolved.repos },
     quarter,
     log,
   );
+  if (droppedNonDefaultBranch > 0) {
+    log(
+      `dropped ${droppedNonDefaultBranch} merged PR(s) whose base was not the default branch`,
+    );
+  }
 
   let members: string[];
   if (resolved.members) {
@@ -108,6 +113,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       members,
       repos: resolved.repos,
       classification: resolved.classification,
+      coAuthorCredit: resolved.coAuthorCredit,
     },
     quarter,
     prsByRepo,
@@ -174,6 +180,7 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       quarter: quarter.label,
       filesWritten: written.length,
       dataGaps: gaps.length,
+      droppedNonDefaultBranch,
     },
   });
 

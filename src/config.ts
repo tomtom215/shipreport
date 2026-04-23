@@ -4,6 +4,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { QuarterRange } from "./types.js";
+import { dateRangeToQuarter, quarterLabelToRange as tzQuarterLabelToRange } from "./tz.js";
 
 const QuarterLabel = z.string().regex(/^\d{4}Q[1-4]$/);
 
@@ -18,6 +19,9 @@ const Classification = z.object({
   infraLabels: z.array(z.string()).default(["ci", "build", "devops", "infra"]),
   docsLabels: z.array(z.string()).default(["docs", "documentation"]),
 });
+
+export const CO_AUTHOR_CREDIT = ["full", "split"] as const;
+const CoAuthorCredit = z.enum(CO_AUTHOR_CREDIT).default("full");
 
 const Output = z.object({
   dir: z.string().default("./out"),
@@ -87,6 +91,7 @@ const MultiTeamShape = z.object({
     .object({
       quarter: z.union([QuarterLabel, DateRange]).optional(),
       timezone: z.string().default("UTC"),
+      coAuthorCredit: CoAuthorCredit,
       output: Output.default({
         dir: "./out",
         formats: ["md", "html"],
@@ -103,6 +108,7 @@ const MultiTeamShape = z.object({
     })
     .default({
       timezone: "UTC",
+      coAuthorCredit: "full",
       output: {
         dir: "./out",
         formats: ["md", "html"],
@@ -195,6 +201,7 @@ function legacyToMulti(l: z.infer<typeof LegacyShape>): Config {
     defaults: {
       quarter: l.quarter,
       timezone: l.timezone,
+      coAuthorCredit: "full",
       output: l.output,
       classification: l.classification,
     },
@@ -216,21 +223,12 @@ export function resolveQuarter(
   tz: string,
 ): QuarterRange {
   if (!q) throw new Error("No quarter specified (team or defaults.quarter).");
-  if (typeof q === "string") return quarterLabelToRange(q, tz);
-  return { label: `${q.from}..${q.to}`, from: q.from, to: q.to };
+  if (typeof q === "string") return tzQuarterLabelToRange(q, tz);
+  return dateRangeToQuarter(q.from, q.to, tz);
 }
 
-export function quarterLabelToRange(label: string, _tz: string): QuarterRange {
-  const m = /^(\d{4})Q([1-4])$/.exec(label);
-  if (!m) throw new Error(`bad quarter label: ${label}`);
-  const year = Number(m[1]);
-  const qi = Number(m[2]);
-  const startMonth = (qi - 1) * 3;
-  const endMonth = startMonth + 3;
-  const from = new Date(Date.UTC(year, startMonth, 1)).toISOString().slice(0, 10);
-  const to = new Date(Date.UTC(year, endMonth, 0)).toISOString().slice(0, 10);
-  return { label, from, to };
-}
+// Re-export for callers that used the old name. Signature unchanged.
+export { quarterLabelToRange } from "./tz.js";
 
 export interface ResolvedTeam {
   name: string;
@@ -243,6 +241,7 @@ export interface ResolvedTeam {
   schedule: string | null;
   output: z.infer<typeof Output>;
   classification: z.infer<typeof Classification>;
+  coAuthorCredit: z.infer<typeof CoAuthorCredit>;
 }
 
 export function resolveTeam(cfg: Config, team: TeamConfig): ResolvedTeam {
@@ -264,6 +263,7 @@ export function resolveTeam(cfg: Config, team: TeamConfig): ResolvedTeam {
     schedule: team.schedule ?? null,
     output,
     classification,
+    coAuthorCredit: cfg.defaults.coAuthorCredit,
   };
 }
 
