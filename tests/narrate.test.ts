@@ -56,6 +56,28 @@ describe("narrate.headline", () => {
   });
 });
 
+describe("narrate.talkingPoints — dominant-kind branches", () => {
+  it("refactor-dominant quarter adds the investment-quarter point", () => {
+    const n = narrate(
+      dev({
+        prsMerged: 5,
+        prsByKind: { feature: 0, bugfix: 0, refactor: 5, docs: 0, infra: 0, other: 0 },
+      }),
+    );
+    expect(n.talkingPoints.join("\n")).toMatch(/Investment quarter.*5 refactors/);
+  });
+
+  it("infra-dominant quarter adds the platform/infra point", () => {
+    const n = narrate(
+      dev({
+        prsMerged: 4,
+        prsByKind: { feature: 0, bugfix: 0, refactor: 0, docs: 0, infra: 4, other: 0 },
+      }),
+    );
+    expect(n.talkingPoints.join("\n")).toMatch(/Platform\/infra quarter.*4 merged/);
+  });
+});
+
 describe("narrate.collaboration", () => {
   it("mentions cross-service contribution when > 1 repo", () => {
     const n = narrate(dev({ crossRepoCollaboration: 3, reviewsGiven: 1, prsMerged: 1 }));

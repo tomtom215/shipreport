@@ -157,6 +157,66 @@ describe("runTeam — dry-run UX", () => {
     state2.close();
   });
 
+  it("overrideQuarter wins over team.quarter and extraFormats append to output.formats", async () => {
+    const cache = await Cache.open(path.join(dir, "cache.sqlite"), 7);
+    const q = quarterLabelToRange("2026Q3", "UTC");
+    new ExtractCache(cache).save(
+      "o/r",
+      q,
+      [rawPR({ repo: "o/r", author: "alice", mergedAt: "2026-07-15T12:00:00Z", updatedAt: "2026-07-15T12:00:00Z" })],
+      "2026-07-20T00:00:00Z",
+    );
+    cache.close();
+
+    const cfg = normalize({
+      github: {},
+      org: "o",
+      teams: [
+        {
+          name: "t",
+          manager: "alice",
+          members: ["alice"],
+          repos: ["o/r"],
+          quarter: "2026Q1", // intentionally wrong; overrideQuarter should win
+        },
+      ],
+      defaults: {
+        quarter: "2026Q1",
+        timezone: "UTC",
+        output: {
+          dir: path.join(dir, "out"),
+          formats: ["md"],
+          perDev: true,
+          teamSummary: true,
+          managerRollup: true,
+        },
+      },
+      audit: { enabled: false, path: path.join(dir, "state.sqlite") },
+      cache: { path: path.join(dir, "cache.sqlite"), ttlDays: 7 },
+    });
+
+    const result = await runTeam({
+      cfg,
+      team: cfg.teams[0]!,
+      log: () => {},
+      triggeredBy: "manual",
+      dryRun: true,
+      overrideQuarter: "2026Q3",
+      extraFormats: ["html", "md"], // "md" already present; "html" new
+    });
+
+    expect(result.quarter).toBe("2026Q3");
+    // Team summary + manager rollup + dev report × (md + html) = 6 files.
+    expect(result.written.filter((p) => p.endsWith(".md"))).toHaveLength(3);
+    expect(result.written.filter((p) => p.endsWith(".html"))).toHaveLength(3);
+    expect(
+      result.written.some((p) => p.includes("team-summary-t-2026Q3")),
+    ).toBe(true);
+    expect(
+      result.written.some((p) => p.includes("manager-rollup-t-2026Q3")),
+    ).toBe(true);
+  });
+
   it("auto-discovers members when `members` is omitted; audits members_discovered", async () => {
     const cache = await Cache.open(path.join(dir, "cache.sqlite"), 7);
     const quarter = quarterLabelToRange("2026Q2", "UTC");

@@ -24,6 +24,16 @@ describe("AuditLog", () => {
     state.close();
   });
 
+  it("head() returns null on an empty log and the latest row afterwards", async () => {
+    const { log, state } = await freshLog();
+    expect(log.head()).toBeNull();
+    const a = log.append({ actor: "alice", event: "run_started", target: "t" });
+    expect(log.head()).toEqual({ seq: a.seq, hash: a.hash });
+    const b = log.append({ actor: "alice", event: "run_completed", target: "t" });
+    expect(log.head()).toEqual({ seq: b.seq, hash: b.hash });
+    state.close();
+  });
+
   it("each row's prev_hash equals the previous row's hash", async () => {
     const { log, state } = await freshLog();
     const a = log.append({ actor: "alice", event: "run_started", target: "t" });

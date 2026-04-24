@@ -40,4 +40,13 @@ describe("Cache", () => {
     expect(c.get("k")?.body).toBe("b");
     c.close();
   });
+
+  it("isFresh is true for an entry just fetched and false past the TTL window", async () => {
+    const c = await Cache.open(await tmp(), 7);
+    expect(c.isFresh({ fetchedAt: Date.now() })).toBe(true);
+    // One TTL + 1 ms in the past falls outside the fresh window.
+    const ttlMs = 7 * 24 * 60 * 60 * 1000;
+    expect(c.isFresh({ fetchedAt: Date.now() - ttlMs - 1 })).toBe(false);
+    c.close();
+  });
 });

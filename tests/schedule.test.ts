@@ -37,6 +37,16 @@ describe("parseCron", () => {
     expect(() => parseCron("60 * * * *")).toThrow();
     expect(() => parseCron("* 25 * * *")).toThrow();
   });
+
+  it("rejects non-integer step, range, and value tokens with field-specific errors", () => {
+    expect(() => parseCron("*/x * * * *")).toThrow(/step.*minute/i);
+    expect(() => parseCron("a-5 * * * *")).toThrow(/range.*minute/i);
+    expect(() => parseCron("x * * * *")).toThrow(/value.*minute/i);
+  });
+
+  it("rejects inverted ranges (start > end)", () => {
+    expect(() => parseCron("10-5 * * * *")).toThrow(/range/i);
+  });
 });
 
 describe("cronMatches", () => {

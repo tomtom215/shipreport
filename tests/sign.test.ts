@@ -105,4 +105,11 @@ describe("loadOrGenerateKey", () => {
     const onDisk = await readFile(keyPath, "utf8");
     expect(onDisk).toMatch(/BEGIN PRIVATE KEY/);
   });
+
+  it("rethrows non-ENOENT errors from the read path (e.g. a corrupt existing file)", async () => {
+    const keyPath = path.join(dir, "corrupt.pem");
+    // A file that exists but is not a PEM — read succeeds; parse fails.
+    await (await import("node:fs/promises")).writeFile(keyPath, "not-a-pem");
+    await expect(loadOrGenerateKey(keyPath)).rejects.toThrow();
+  });
 });

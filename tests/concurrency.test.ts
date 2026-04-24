@@ -57,4 +57,14 @@ describe("runConcurrent", () => {
     expect(results).toEqual([]);
     expect(stats.peakConcurrency).toBe(0);
   });
+
+  it("surfaces only the first error when several tasks throw", async () => {
+    // Run serially so ordering is deterministic: index 1 throws before 2.
+    await expect(
+      runConcurrent([1, 2, 3], 1, async (n) => {
+        if (n >= 2) throw new Error(`boom-${n}`);
+        return n;
+      }),
+    ).rejects.toThrow("boom-2");
+  });
 });
