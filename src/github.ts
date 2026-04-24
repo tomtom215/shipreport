@@ -71,7 +71,7 @@ export function makeClient(opts: GithubOptions): GithubClient {
         return retryCount < max;
       },
     },
-    retry: { doNotRetry: ["400", "401", "403", "404", "422"] },
+    retry: { doNotRetry: [400, 401, 403, 404, 422] },
   });
 
   const graphqlBaseUrl = opts.graphqlUrl.replace(/\/graphql$/, "");

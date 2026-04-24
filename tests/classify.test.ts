@@ -86,4 +86,16 @@ describe("classifyPR", () => {
       classifyPR(pr({ labels: [{ name: "bug" }, { name: "feature" }] }), cfg),
     ).toBe("bugfix");
   });
+
+  it("infra label path (no matching title) → infra", () => {
+    expect(
+      classifyPR(pr({ title: "random", labels: [{ name: "devops" }] }), cfg),
+    ).toBe("infra");
+  });
+
+  it("docs label path (no matching title) → docs", () => {
+    expect(
+      classifyPR(pr({ title: "random", labels: [{ name: "documentation" }] }), cfg),
+    ).toBe("docs");
+  });
 });

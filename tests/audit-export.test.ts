@@ -71,4 +71,27 @@ describe("exportJsonl + verifyJsonl", () => {
   it("empty log → empty export → ok:true rows:0", () => {
     expect(verifyJsonl("")).toMatchObject({ ok: true, rows: 0 });
   });
+
+  it("flags malformed JSON lines with brokeAtSeq = -1", () => {
+    const res = verifyJsonl("{not valid json\n");
+    expect(res).toMatchObject({ ok: false, brokeAtSeq: -1, reason: "malformed json" });
+  });
+
+  it("detects a prev_hash mismatch independent of row-hash tampering", async () => {
+    const { log, state } = await freshLog();
+    log.append({ actor: "a", event: "run_started", target: "t" });
+    log.append({ actor: "a", event: "run_completed", target: "t" });
+    const jsonl = exportJsonl(log.readForward());
+    state.close();
+
+    // Rewrite row 0's prevHash so the chain anchor no longer matches the
+    // genesis zero hash supplied by verifyJsonl().
+    const [first, ...rest] = jsonl.split("\n");
+    const row = JSON.parse(first!) as { prevHash: string };
+    row.prevHash = "f".repeat(64);
+    const broken = [JSON.stringify(row), ...rest].join("\n");
+
+    const res = verifyJsonl(broken);
+    expect(res).toMatchObject({ ok: false, reason: "prev_hash mismatch" });
+  });
 });

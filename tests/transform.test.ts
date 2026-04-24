@@ -108,6 +108,26 @@ describe("aggregateDev", () => {
     expect(d.reviewEventsGiven).toBe(3);
   });
 
+  it("sorts linkedIssuesClosed by repo then number, exercising all three ordering branches", () => {
+    const prs = [
+      pr({
+        author: "alice",
+        number: 1,
+        linkedIssues: [
+          { repo: "b/x", number: 2, title: "", url: "", closedAt: null },
+          { repo: "a/x", number: 9, title: "", url: "", closedAt: null },
+          { repo: "a/x", number: 1, title: "", url: "", closedAt: null },
+        ],
+      }),
+    ];
+    const d = aggregateDev("alice", prs, opts);
+    expect(d.linkedIssuesClosed.map((i) => `${i.repo}#${i.number}`)).toEqual([
+      "a/x#1",
+      "a/x#9",
+      "b/x#2",
+    ]);
+  });
+
   it("sums filesTouched and crossRepoCollaboration", () => {
     const prs = [
       pr({ author: "alice", repo: "acme/svc-a", changedFiles: 3 }),
