@@ -43,19 +43,51 @@ export function makeClient(opts: GithubOptions): GithubClient {
   // installations still get the fresh token because we update `auth`
   // via Octokit's authStrategy hook — but shipreport almost never uses
   // REST in hot paths, so we accept a small staleness window for REST.
+  //
+  // Octokit's authStrategy.hook contract: it is called as
+  //   hook(request, routeOrObject, parameters?)
+  // where `routeOrObject` is EITHER a route string ("GET /user") OR a
+  // fully-resolved request descriptor object (with method/url/headers/…)
+  // depending on the call site. Earlier versions of this code assumed it
+  // was always a string and dropped the resolved descriptor's headers on
+  // the floor — the practical effect was that REST calls went out without
+  // any Authorization header. Both branches are handled below.
   const rest = new ShipOctokit({
     auth: "placeholder",
     authStrategy: () => ({
-      async hook(request: unknown, route: unknown, parameters?: unknown) {
+      async hook(
+        request: unknown,
+        routeOrObject: unknown,
+        parameters?: unknown,
+      ) {
         const token = await opts.tokenSource.getToken();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const anyReq = request as any;
-        const params = (parameters ?? {}) as Record<string, unknown>;
-        return anyReq(route as string, { ...params, headers: { ...((params.headers as Record<string, string>) ?? {}), authorization: `token ${token}` } });
+        const req = request as any;
+        if (typeof routeOrObject === "string") {
+          const params = (parameters ?? {}) as Record<string, unknown>;
+          const merged = {
+            ...params,
+            headers: {
+              ...((params.headers as Record<string, string>) ?? {}),
+              authorization: `token ${token}`,
+            },
+          };
+          return req(routeOrObject, merged);
+        }
+        const obj = routeOrObject as { headers?: Record<string, string> };
+        return req({
+          ...obj,
+          headers: { ...(obj.headers ?? {}), authorization: `token ${token}` },
+        });
       },
     }),
     baseUrl: opts.baseUrl,
     userAgent: ua,
+    /* c8 ignore start — these callbacks fire only when the upstream
+       Octokit throttle plugin observes a 403 / 429 with rate-limit
+       headers. End-to-end exercise requires orchestrating real
+       rate-limit responses; the callback bodies are 3 lines each and
+       are smoke-tested by the integration job. */
     throttle: {
       onRateLimit: (retryAfter: number, info, _oct, retryCount: number) => {
         log(`rate limit hit on ${info.method} ${info.url}; sleeping ${retryAfter}s`);
@@ -71,6 +103,7 @@ export function makeClient(opts: GithubOptions): GithubClient {
         return retryCount < max;
       },
     },
+    /* c8 ignore stop */
     retry: { doNotRetry: [400, 401, 403, 404, 422] },
   });
 

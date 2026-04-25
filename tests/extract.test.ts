@@ -390,6 +390,208 @@ function toNode(n: {
   };
 }
 
+describe("extractAll — node payload mapping (nodeToRaw)", () => {
+  it("maps milestone, reviews, review requests, and linked issues from a fully-populated GraphQL node", async () => {
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const richClient: any = {
+      rest: {},
+      baseUrl: "",
+      async probeRemaining() {
+        return 4999;
+      },
+      async graphql() {
+        return {
+          repository: {
+            defaultBranchRef: { name: "main" },
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: "x" },
+              nodes: [
+                {
+                  number: 42,
+                  title: "feat: add widget",
+                  body: "Fixes #99\n\nWith a co-author.",
+                  url: "https://example/42",
+                  state: "MERGED",
+                  mergedAt: "2026-02-15T12:00:00Z",
+                  updatedAt: "2026-02-15T12:00:00Z",
+                  baseRefName: "main",
+                  additions: 100,
+                  deletions: 20,
+                  changedFiles: 5,
+                  author: { login: "alice" },
+                  labels: { nodes: [{ name: "feature" }, { name: "p1" }] },
+                  milestone: { title: "Q1 launch" },
+                  comments: { totalCount: 7 },
+                  mergeCommit: {
+                    message:
+                      "feat: add widget\n\nCo-authored-by: Bob <7+bob@users.noreply.github.com>",
+                  },
+                  reviews: {
+                    nodes: [
+                      { author: { login: "carol" }, state: "APPROVED", comments: { totalCount: 2 } },
+                      { author: null, state: "DISMISSED", comments: { totalCount: 0 } },
+                    ],
+                  },
+                  reviewRequests: {
+                    nodes: [
+                      { requestedReviewer: { login: "dave" } },
+                      { requestedReviewer: { name: "platform-team" } },
+                      { requestedReviewer: null },
+                    ],
+                  },
+                  closingIssuesReferences: {
+                    nodes: [
+                      {
+                        number: 99,
+                        title: "Widget request",
+                        url: "https://example/99",
+                        closedAt: "2026-02-15T12:30:00Z",
+                        repository: { nameWithOwner: "o/r" },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        };
+      },
+    };
+    const res = await extractAll(richClient, { repos: ["o/r"] }, q);
+    const pr = res.prsByRepo.get("o/r")![0]!;
+
+    expect(pr.author).toBe("alice");
+    expect(pr.coAuthors).toEqual(["bob"]);
+    expect(pr.milestone).toEqual({ title: "Q1 launch" });
+    expect(pr.labels.map((l) => l.name)).toEqual(["feature", "p1"]);
+    // Reviews: only entries with an author login survive the filter.
+    expect(pr.reviews).toEqual([
+      { user: "carol", state: "APPROVED", inlineCommentCount: 2 },
+    ]);
+    // Review requests: user logins + team names; null reviewers dropped.
+    expect(pr.reviewRequests).toEqual(["dave", "platform-team"]);
+    expect(pr.linkedIssues).toEqual([
+      {
+        repo: "o/r",
+        number: 99,
+        title: "Widget request",
+        url: "https://example/99",
+        closedAt: "2026-02-15T12:30:00Z",
+      },
+    ]);
+    expect(pr.comments).toBe(7);
+    expect(pr.changedFiles).toBe(5);
+    expect(pr.additions).toBe(100);
+    expect(pr.deletions).toBe(20);
+  });
+
+  it("handles a node with a null author by stamping it as 'ghost'", async () => {
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client: any = {
+      rest: {},
+      baseUrl: "",
+      async probeRemaining() {
+        return null;
+      },
+      async graphql() {
+        return {
+          repository: {
+            defaultBranchRef: { name: "main" },
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: "x" },
+              nodes: [
+                {
+                  number: 1,
+                  title: "fix: orphaned",
+                  body: null,
+                  url: "https://example/1",
+                  state: "MERGED",
+                  mergedAt: "2026-02-01T00:00:00Z",
+                  updatedAt: "2026-02-01T00:00:00Z",
+                  baseRefName: "main",
+                  additions: 0,
+                  deletions: 0,
+                  changedFiles: 0,
+                  author: null,
+                  labels: { nodes: [] },
+                  milestone: null,
+                  comments: { totalCount: 0 },
+                  mergeCommit: null,
+                  reviews: { nodes: [] },
+                  reviewRequests: { nodes: [] },
+                  closingIssuesReferences: { nodes: [] },
+                },
+              ],
+            },
+          },
+        };
+      },
+    };
+    const res = await extractAll(client, { repos: ["o/r"] }, q);
+    const pr = res.prsByRepo.get("o/r")![0]!;
+    expect(pr.author).toBe("ghost");
+    expect(pr.body).toBe("");
+    expect(pr.milestone).toBeNull();
+  });
+
+  it("stops paginating at the 40-page safety cap", async () => {
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    let calls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client: any = {
+      rest: {},
+      baseUrl: "",
+      async probeRemaining() {
+        return null;
+      },
+      async graphql() {
+        calls += 1;
+        // Always return one in-window node + claim hasNextPage=true.
+        return {
+          repository: {
+            defaultBranchRef: { name: "main" },
+            pullRequests: {
+              pageInfo: { hasNextPage: true, endCursor: `p${calls}` },
+              nodes: [toNodePayload(calls, "2026-02-15T00:00:00Z")],
+            },
+          },
+        };
+      },
+    };
+    const logs: string[] = [];
+    await extractAll(client, { repos: ["o/r"] }, q, { log: (m) => logs.push(m) });
+    // Cap is 40 pages; we exit cleanly with the cap warning logged once.
+    expect(calls).toBeLessThanOrEqual(41);
+    expect(logs.some((l) => /40 pages \(safety cap\)/.test(l))).toBe(true);
+  });
+});
+
+function toNodePayload(num: number, ts: string): Record<string, unknown> {
+  return {
+    number: num,
+    title: "feat: x",
+    body: "",
+    url: `https://example/${num}`,
+    state: "MERGED",
+    mergedAt: ts,
+    updatedAt: ts,
+    baseRefName: "main",
+    additions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    author: { login: "alice" },
+    labels: { nodes: [] },
+    milestone: null,
+    comments: { totalCount: 0 },
+    mergeCommit: { message: null },
+    reviews: { nodes: [] },
+    reviewRequests: { nodes: [] },
+    closingIssuesReferences: { nodes: [] },
+  };
+}
+
 describe("extractAll — concurrency + counters", () => {
   it("reports peakConcurrency on counters (bounded by configured limit)", async () => {
     const q = quarterLabelToRange("2026Q1", "UTC");

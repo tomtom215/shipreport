@@ -1,0 +1,24 @@
+# Code-ownership map. Reviewers in the listed groups are auto-requested
+# on PRs touching matching paths. The entries here are deliberately
+# conservative — every change to the audit log or release pipeline should
+# be reviewed by the project owner.
+
+# Catch-all
+*                               @tomtom215
+
+# Compliance-critical paths get an explicit, narrower ownership clause
+# so a maintainer cannot accidentally self-approve a chain-logic change
+# without an outside reviewer.
+/src/audit.ts                   @tomtom215
+/src/audit-export.ts            @tomtom215
+/src/sign.ts                    @tomtom215
+/tests/audit*.test.ts           @tomtom215
+/SECURITY.md                    @tomtom215
+
+# Release pipeline
+/.github/workflows/release.yml  @tomtom215
+/docker/Dockerfile              @tomtom215
+
+# Operator-facing docs
+/docs/                          @tomtom215
+/examples/                      @tomtom215

@@ -61,8 +61,12 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
     });
   }
 
+  // overrideQuarter: empty string ("") and undefined are both "no override"
+  // — citty boolean-coerces missing string args to "" in some configurations
+  // and the CLI tests hand us "" explicitly. A blank quarter here would
+  // hit `resolveQuarter("")` and throw with a confusing schema error.
   const teamCfg =
-    opts.overrideQuarter !== undefined
+    opts.overrideQuarter !== undefined && opts.overrideQuarter !== ""
       ? { ...team, quarter: opts.overrideQuarter as TeamConfig["quarter"] }
       : team;
   const resolved = resolveTeam(cfg, teamCfg);

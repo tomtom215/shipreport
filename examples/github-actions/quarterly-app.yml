@@ -1,0 +1,55 @@
+# Example caller workflow — quarterly run, GitHub App auth.
+#
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  REPLACE THIS PIN BEFORE COPYING TO YOUR REPO                    │
+# │  Both the `uses:` ref and the `shipreport_ref:` input must be    │
+# │  set to a SHA (40-hex) or a release tag (e.g. v0.2.0). The       │
+# │  values below are placeholder SHAs from this branch and will go  │
+# │  stale; replace them with the latest tag from:                   │
+# │     https://github.com/tomtom215/shipreport/releases             │
+# │  Do NOT ship `@main` to production — see docs/14-security.md.    │
+# └──────────────────────────────────────────────────────────────────┘
+#
+# Copy this into YOUR repo at `.github/workflows/quarterly.yml`. Required:
+#   * `shipreport.yaml` at the repo root with a `github.app` block — see
+#     docs/04-auth-github-app.md for the exact shape.
+#   * Secrets:
+#       SHIPREPORT_APP_PRIVATE_KEY — App private key in PEM form.
+#                                    \n-escaped is OK; literal newlines also OK.
+#       SHIPREPORT_AUDIT_KEY        — optional ed25519 PEM for audit snapshots.
+#
+# App auth is recommended for enterprise: installation tokens are scoped to
+# specific repos, expire hourly (auto-renewed at 50 min), and can't escape
+# the org's permission policy. See docs/04-auth-github-app.md.
+
+name: shipreport-quarterly
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | doctor"
+        required: false
+        default: "run"
+      team:
+        description: "Team name; empty for --all"
+        required: false
+  schedule:
+    - cron: "0 14 1 1,4,7,10 *"
+
+permissions:
+  contents: read
+
+jobs:
+  shipreport:
+    # REPLACE: pin to the latest release tag or commit SHA.
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@0954c506f33472309b50bda30a48ba42a2288f12
+    with:
+      config: shipreport.yaml
+      mode: ${{ inputs.mode || 'run' }}
+      team: ${{ inputs.team || '' }}
+      # REPLACE: same pin as the `uses:` ref above.
+      shipreport_ref: 0954c506f33472309b50bda30a48ba42a2288f12
+    secrets:
+      shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+      shipreport_audit_key: ${{ secrets.SHIPREPORT_AUDIT_KEY }}

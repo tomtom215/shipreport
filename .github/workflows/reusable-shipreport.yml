@@ -1,0 +1,219 @@
+name: reusable-shipreport
+
+# Reusable workflow callable from any repository. Operators with multiple
+# orgs (one repo per org) can keep the shipreport.yaml + secrets in each
+# org's repo and call this workflow from a single org-level template,
+# avoiding YAML duplication.
+#
+# Example caller — `.github/workflows/quarterly.yml`:
+#
+#   on:
+#     workflow_dispatch:
+#     schedule:
+#       - cron: "0 14 1 1,4,7,10 *"
+#   jobs:
+#     run:
+#       uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+#       with:
+#         config: shipreport.yaml
+#         mode: run            # or 'dry-run' / 'doctor'
+#         team: ""              # empty → --all
+#         quarter: ""
+#       secrets:
+#         shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
+#         shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: "Path to shipreport.yaml (relative to caller repo root)"
+        required: false
+        type: string
+        default: "shipreport.yaml"
+      mode:
+        description: "run | dry-run | doctor | tick"
+        required: false
+        type: string
+        default: "run"
+      team:
+        description: "Team name; empty for --all (run/dry-run only)"
+        required: false
+        type: string
+        default: ""
+      quarter:
+        description: "Override quarter, e.g. 2026Q2 (optional)"
+        required: false
+        type: string
+        default: ""
+      shipreport_ref:
+        description: |
+          REQUIRED. Branch / tag / SHA to check shipreport's source out at.
+          Pin to a commit SHA (40-hex) for SLSA-grade reproducibility, or
+          to a release tag (e.g. v0.2.0) for less-strict supply chains.
+          Floating refs (main, master, latest) are accepted but strongly
+          discouraged — workflow_run logs will warn when one is used.
+        required: true
+        type: string
+      runs_on:
+        description: |
+          Runner selector. Pass a single label string (e.g. "ubuntu-latest")
+          OR a JSON array string (e.g. '["self-hosted","linux","shipreport"]').
+          The workflow parses the JSON form via fromJSON before assigning to
+          runs-on, so both forms route correctly without GitHub having to
+          guess. See examples/github-actions/ghes-self-hosted.yml.
+        required: false
+        type: string
+        default: "ubuntu-latest"
+    secrets:
+      shipreport_token:
+        description: "PAT with read scopes on contents/issues/PRs/metadata/members"
+        required: false
+      shipreport_app_private_key:
+        description: "GitHub App private key in PEM form (\\n-escaped is OK)"
+        required: false
+      shipreport_audit_key:
+        description: "ed25519 private key for `audit snapshot` (PEM)"
+        required: false
+
+jobs:
+  # Decode the runs_on input once. If it begins with `[`, treat it as a JSON
+  # array; otherwise pass through as a single label. This avoids the
+  # ambiguity of GitHub silently failing on a JSON-string-where-array-expected
+  # mismatch in `runs-on:`.
+  resolve-runner:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      runs_on: ${{ steps.r.outputs.value }}
+    steps:
+      - id: r
+        env:
+          INPUT: ${{ inputs.runs_on }}
+        run: |
+          if [ "${INPUT:0:1}" = "[" ]; then
+            # JSON array form. fromJSON-friendly.
+            echo "value=$INPUT" >> "$GITHUB_OUTPUT"
+          else
+            # Single-label form. Wrap as a one-element JSON array so the
+            # downstream `fromJSON` is uniform.
+            printf 'value=["%s"]\n' "$INPUT" >> "$GITHUB_OUTPUT"
+          fi
+
+  run:
+    needs: resolve-runner
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # We need shipreport's source itself (the bin entry point) plus the
+      # caller's shipreport.yaml. The simplest pattern is: check shipreport
+      # out at /opt/shipreport, the caller's repo at the workspace root.
+      - name: Check out caller repo (for shipreport.yaml)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: caller
+
+      - name: Warn if shipreport_ref is a floating ref
+        run: |
+          ref="${{ inputs.shipreport_ref }}"
+          case "$ref" in
+            main|master|latest|HEAD)
+              echo "::warning title=Floating shipreport_ref::You passed shipreport_ref='$ref'. Pin to a SHA or release tag for reproducibility — see examples/github-actions/."
+              ;;
+          esac
+
+      - name: Check out shipreport source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: tomtom215/shipreport
+          ref: ${{ inputs.shipreport_ref }}
+          path: shipreport
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with: { version: 10 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: shipreport/pnpm-lock.yaml
+
+      - name: Install + build shipreport
+        working-directory: shipreport
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.local/share/shipreport
+            ~/.cache/shipreport
+          key: shipreport-state-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            shipreport-state-${{ github.repository }}-${{ github.ref_name }}-
+
+      # `doctor` resolves auth before anything else. Dry-run callers may
+      # legitimately have no token configured (offline cache iteration), so
+      # for `mode: dry-run` we pass --offline; doctor then validates the
+      # schema, paths, and crons but skips the auth + GraphQL probes.
+      # `mode: doctor` is the only case where the preflight is the actual
+      # work — it runs as a non-offline doctor.
+      - name: Preflight (doctor)
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.shipreport_token }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.shipreport_app_private_key }}
+        working-directory: caller
+        run: |
+          BIN="${{ github.workspace }}/shipreport/bin/shipreport.js"
+          if [ "${{ inputs.mode }}" = "dry-run" ]; then
+            node "$BIN" doctor --config ${{ inputs.config }} --offline
+          else
+            node "$BIN" doctor --config ${{ inputs.config }}
+          fi
+
+      - name: Execute mode
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.shipreport_token }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.shipreport_app_private_key }}
+          SHIPREPORT_AUDIT_KEY: ${{ secrets.shipreport_audit_key }}
+        working-directory: caller
+        run: |
+          set -e
+          BIN="${{ github.workspace }}/shipreport/bin/shipreport.js"
+          case "${{ inputs.mode }}" in
+            doctor)
+              echo "Doctor probe completed in preflight; nothing further."
+              ;;
+            tick)
+              node "$BIN" schedule tick --config ${{ inputs.config }} --verbose
+              ;;
+            run|dry-run)
+              dry=""
+              [ "${{ inputs.mode }}" = "dry-run" ] && dry="--dryRun"
+              if [ -n "${{ inputs.team }}" ]; then
+                node "$BIN" run --config ${{ inputs.config }} \
+                  --team "${{ inputs.team }}" \
+                  ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
+                  $dry --verbose
+              else
+                node "$BIN" run --config ${{ inputs.config }} --all \
+                  ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
+                  $dry --verbose
+              fi
+              ;;
+            *)
+              echo "::error title=Unknown mode::mode='${{ inputs.mode }}' is not run|dry-run|doctor|tick."
+              exit 2
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ always() && hashFiles('caller/out/**/*') != '' }}
+        with:
+          name: shipreport-${{ github.run_id }}
+          path: caller/out/
+          retention-days: 90
+          if-no-files-found: ignore

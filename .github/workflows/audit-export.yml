@@ -1,0 +1,188 @@
+name: shipreport-audit-export
+
+# Daily JSONL export of the hash-chained audit log plus a signed (ed25519)
+# chain-head snapshot. Both files are:
+#   1. uploaded as a 365-day GH Actions artifact (cheap, ephemeral),
+#   2. committed to an orphan branch named `shipreport-audit-evidence`,
+#      which gives you a git-anchored, tamper-evident timeline that
+#      survives artifact-retention expiry.
+#
+# This is the SOC2 evidence trail for the scheduler. Pure read-only on the
+# audit DB. Never modifies the chain. The state DB itself is restored from
+# the same cache key that `tick.yml` writes, so this workflow always sees
+# the latest chain head.
+#
+# Skipped cleanly when no shipreport.yaml is present at the repo root —
+# the upstream mirror's runs stay green without operator config.
+
+on:
+  schedule:
+    - cron: "30 5 * * *"   # 05:30 UTC daily
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "ISO date/time lower bound for the export (optional)"
+        required: false
+      skip_commit:
+        description: "Upload artifact only; do not commit to the evidence branch"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write          # required for the `git push` to the evidence branch
+
+concurrency:
+  group: shipreport-audit-export-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Default checkout depth is 1; we need the full history of the
+          # evidence branch so a post-commit `git log` shows the full chain
+          # of exported snapshots.
+          fetch-depth: 0
+
+      - name: Detect operator config
+        id: detect
+        run: |
+          if [ -f shipreport.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Template repo::No shipreport.yaml at repo root — exporting nothing."
+          fi
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        if: steps.detect.outputs.present == 'true'
+        with: { version: 10 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.detect.outputs.present == 'true'
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+        if: steps.detect.outputs.present == 'true'
+      - run: pnpm build
+        if: steps.detect.outputs.present == 'true'
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.detect.outputs.present == 'true'
+        with:
+          path: |
+            ~/.local/share/shipreport
+            ~/.cache/shipreport
+          key: shipreport-state-${{ github.ref_name }}-export-${{ github.run_id }}
+          restore-keys: |
+            shipreport-state-${{ github.ref_name }}-
+
+      - name: Stage signing key
+        if: steps.detect.outputs.present == 'true'
+        env:
+          SHIPREPORT_AUDIT_KEY: ${{ secrets.SHIPREPORT_AUDIT_KEY }}
+        # `printenv VAR` emits the env var's bytes verbatim (no shell
+        # interpretation of %, \, $, control chars, or newline forms).
+        # `printf '%s' "$VAR"` would mangle a PEM containing `%`, and any
+        # `<<HEREDOC` form inside a YAML `run:` block has indent / expansion
+        # gotchas. printenv has neither.
+        run: |
+          set -euo pipefail
+          if [ -z "${SHIPREPORT_AUDIT_KEY:-}" ]; then
+            echo "::notice title=No audit-signing key::Snapshots will be signed with an auto-generated key in this run only. Set the SHIPREPORT_AUDIT_KEY secret to anchor signatures across runs."
+            exit 0
+          fi
+          mkdir -p ~/.config/shipreport
+          umask 0077
+          printenv SHIPREPORT_AUDIT_KEY > ~/.config/shipreport/audit-ed25519.pem
+          chmod 0600 ~/.config/shipreport/audit-ed25519.pem
+          # Sanity-check: the file must start with a PEM header. Catches
+          # the most common operator error (pasting just the base64 body).
+          head -n 1 ~/.config/shipreport/audit-ed25519.pem | grep -q "BEGIN " || {
+            echo "::error title=Malformed key::SHIPREPORT_AUDIT_KEY does not look like a PEM file (no '-----BEGIN ...-----' header)."
+            exit 1
+          }
+
+      - name: Export + sign
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p shipreport-audit
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "stamp=$stamp" >> "$GITHUB_ENV"
+          # Build the optional --since flag as a bash array so an empty
+          # value disappears safely and a non-empty value passes as two
+          # separate argv items. Avoids shellcheck SC2086 on unquoted $var.
+          since_args=()
+          if [ -n "${{ inputs.since }}" ]; then
+            since_args=(--since "${{ inputs.since }}")
+          fi
+          node bin/shipreport.js audit export \
+            --config shipreport.yaml \
+            --format jsonl \
+            "${since_args[@]}" \
+            > "shipreport-audit/${stamp}.jsonl"
+          node bin/shipreport.js audit snapshot --config shipreport.yaml \
+            > "shipreport-audit/${stamp}.snapshot.json"
+
+      - name: Verify chain
+        if: steps.detect.outputs.present == 'true'
+        run: node bin/shipreport.js audit verify --config shipreport.yaml
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ steps.detect.outputs.present == 'true' && hashFiles('shipreport-audit/**/*') != '' }}
+        with:
+          name: shipreport-audit-export-${{ github.run_id }}
+          path: shipreport-audit/
+          retention-days: 365
+
+      - name: Commit + push to evidence branch
+        if: ${{ steps.detect.outputs.present == 'true' && inputs.skip_commit != true && hashFiles('shipreport-audit/**/*') != '' }}
+        env:
+          GH_BRANCH: shipreport-audit-evidence
+        run: |
+          set -euo pipefail
+          git config user.name  "shipreport-audit-bot[bot]"
+          git config user.email "shipreport-audit-bot@users.noreply.github.com"
+          # Switch to (or create) the orphan evidence branch. We don't carry
+          # over main's history so the evidence branch holds nothing but
+          # signed exports, never application source.
+          if git ls-remote --exit-code --heads origin "$GH_BRANCH" >/dev/null; then
+            git fetch origin "$GH_BRANCH" --depth 1
+            git switch "$GH_BRANCH"
+            git pull --ff-only origin "$GH_BRANCH"
+          else
+            git switch --orphan "$GH_BRANCH"
+            git rm -rf . >/dev/null 2>&1 || true
+            cat > README.md <<'EOF'
+          # shipreport audit evidence
+
+          This branch is append-only. Every commit is one daily export of
+          the hash-chained audit log plus a signed ed25519 chain-head
+          snapshot. See the upstream `docs/12-audit-log.md` for the model.
+
+          Do not edit. Do not rewrite history. Configure branch protection
+          to forbid force-push and to require status checks before any
+          merge into this branch.
+          EOF
+            git add README.md
+            git commit -m "init shipreport-audit-evidence"
+          fi
+          mkdir -p exports
+          cp -r shipreport-audit/* exports/
+          git add exports/
+          # Idempotent: if no new files (e.g. workflow re-run with the same
+          # stamp) the commit is a no-op and we exit 0 cleanly.
+          if git diff --cached --quiet; then
+            echo "::notice title=No new evidence::Same-second re-run; nothing new to commit."
+            exit 0
+          fi
+          git commit -m "audit: export ${stamp}"
+          git push origin "$GH_BRANCH"
+
+      - name: Suggest branch protection (one-time)
+        if: ${{ steps.detect.outputs.present == 'true' && inputs.skip_commit != true }}
+        run: |
+          echo "::notice title=Branch protection::Configure 'shipreport-audit-evidence' with required status checks and forbid force-push. See docs/12-audit-log.md."

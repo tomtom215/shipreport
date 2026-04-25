@@ -1,0 +1,44 @@
+# Example caller workflow — quarterly run, PAT auth.
+#
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  REPLACE THIS PIN BEFORE COPYING TO YOUR REPO                    │
+# │  Both the `uses:` ref and the `shipreport_ref:` input must be    │
+# │  set to a SHA (40-hex) or a release tag (e.g. v0.2.0). The       │
+# │  values below are placeholder SHAs from this branch and will go  │
+# │  stale; replace them with the latest tag from:                   │
+# │     https://github.com/tomtom215/shipreport/releases             │
+# │  Do NOT ship `@main` to production — see docs/14-security.md.    │
+# └──────────────────────────────────────────────────────────────────┘
+#
+# Copy this into YOUR repo at `.github/workflows/quarterly.yml`. Provide:
+#   * `shipreport.yaml` at the repo root with at least one team.
+#   * Secret `SHIPREPORT_TOKEN` set to a fine-grained PAT (see
+#     docs/03-auth-pat.md for the exact scopes).
+
+name: shipreport-quarterly
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | doctor"
+        required: false
+        default: "run"
+  schedule:
+    - cron: "0 14 1 1,4,7,10 *"
+
+permissions:
+  contents: read
+
+jobs:
+  shipreport:
+    # REPLACE: pin to the latest release tag or commit SHA.
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@0954c506f33472309b50bda30a48ba42a2288f12
+    with:
+      config: shipreport.yaml
+      mode: ${{ inputs.mode || 'run' }}
+      # REPLACE: same pin as the `uses:` ref above. The reusable workflow
+      # checks the source out at this ref and warns on floating refs.
+      shipreport_ref: 0954c506f33472309b50bda30a48ba42a2288f12
+    secrets:
+      shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}

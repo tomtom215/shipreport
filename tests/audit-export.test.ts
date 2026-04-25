@@ -72,6 +72,10 @@ describe("exportJsonl + verifyJsonl", () => {
     expect(verifyJsonl("")).toMatchObject({ ok: true, rows: 0 });
   });
 
+  it("exportJsonl([]) returns the empty string (no trailing newline)", () => {
+    expect(exportJsonl([])).toBe("");
+  });
+
   it("flags malformed JSON lines with brokeAtSeq = -1", () => {
     const res = verifyJsonl("{not valid json\n");
     expect(res).toMatchObject({ ok: false, brokeAtSeq: -1, reason: "malformed json" });

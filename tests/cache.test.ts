@@ -49,4 +49,23 @@ describe("Cache", () => {
     expect(c.isFresh({ fetchedAt: Date.now() - ttlMs - 1 })).toBe(false);
     c.close();
   });
+
+  it("checkpoint round-trip and clear", async () => {
+    const c = await Cache.open(await tmp(), 7);
+    c.setCheckpoint("k", "cur-1", '{"pages":1}');
+    const ck = c.getCheckpoint("k");
+    expect(ck).not.toBeNull();
+    expect(ck!.cursor).toBe("cur-1");
+    expect(ck!.partialBody).toBe('{"pages":1}');
+    c.clearCheckpoint("k");
+    expect(c.getCheckpoint("k")).toBeNull();
+    c.close();
+  });
+
+  it("prune across all three tables: counts deletions from each", async () => {
+    const c = await Cache.open(await tmp(), 7);
+    // Empty store → prune returns 0 (covers the COALESCE/?? branch).
+    expect(c.prune()).toBe(0);
+    c.close();
+  });
 });

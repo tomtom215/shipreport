@@ -1,0 +1,76 @@
+name: validate-config
+
+# PR-time validation for the operator's `shipreport.yaml`. Runs WITHOUT
+# secrets — `shipreport doctor` is auth-aware and would fail fast in this
+# context, so we use a config-load-only path that:
+#   * parses the YAML against the Zod schema (catches typos, bad cron, etc.),
+#   * confirms every team has at least one repo and either members or
+#     autoMembers,
+#   * confirms `dryRun` works against the repo's checked-in cache (if any),
+#   * runs `actionlint` over every workflow under `.github/workflows/`.
+#
+# This is the workflow operators should keep enabled on PRs against their
+# fork. It deliberately needs zero permissions and zero secrets.
+
+on:
+  pull_request:
+    paths:
+      - "shipreport.yaml"
+      - ".github/workflows/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with: { version: 10 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Detect operator config
+        id: detect
+        run: |
+          if [ -f shipreport.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No shipreport.yaml::Validation skipped — the upstream mirror has no config to validate."
+          fi
+
+      # config-only validation: parses the YAML and fails fast on any
+      # schema/cron error. No network, no token required.
+      - name: Validate shipreport.yaml schema
+        if: steps.detect.outputs.present == 'true'
+        run: node scripts/validate-config.mjs shipreport.yaml
+
+      - name: Install actionlint (official binary, SHA-256 verified)
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+          ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+        run: |
+          set -euo pipefail
+          # `--retry-all-errors` covers transient 5xx / 429 from GitHub
+          # Releases that would otherwise fail this step with curl exit
+          # 22 (HTTP 4xx/5xx).
+          curl --fail --silent --show-error --location \
+               --retry 5 --retry-delay 2 --retry-all-errors \
+               -o actionlint.tgz \
+               "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
+          tar -xzf actionlint.tgz actionlint
+          chmod +x actionlint
+
+      - run: ./actionlint -color .github/workflows/*.yml

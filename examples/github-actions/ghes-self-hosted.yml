@@ -1,0 +1,53 @@
+# Example caller workflow — GitHub Enterprise Server (GHES) on a
+# self-hosted runner inside your network.
+#
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  REPLACE THIS PIN BEFORE COPYING TO YOUR REPO                    │
+# │  Both the `uses:` ref and the `shipreport_ref:` input must be    │
+# │  set to a SHA (40-hex) or a release tag (e.g. v0.2.0). The       │
+# │  values below are placeholder SHAs from this branch.             │
+# │  Do NOT ship `@main` to production — see docs/14-security.md.    │
+# └──────────────────────────────────────────────────────────────────┘
+#
+# Required:
+#   * Self-hosted runner with the labels `self-hosted, linux, shipreport`
+#     (or change `runs_on` below). The runner needs network access to your
+#     GHES host. Air-gapped setups should use the Docker recipe in
+#     docs/10-deployment-docker.md instead.
+#   * `shipreport.yaml` with `github.baseUrl` and `github.graphqlUrl`
+#     pointing at your GHES install.
+#   * Either SHIPREPORT_TOKEN (PAT) or SHIPREPORT_APP_PRIVATE_KEY (App).
+#
+# `runs_on` accepts a JSON-array string when you need to target a runner
+# by multiple labels; the reusable workflow parses it via fromJSON before
+# assigning to `runs-on:`. A single label like "ubuntu-latest" is also OK.
+
+name: shipreport-ghes
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | doctor"
+        required: false
+        default: "run"
+  schedule:
+    - cron: "0 15 1 1,4,7,10 *"
+
+permissions:
+  contents: read
+
+jobs:
+  shipreport:
+    # REPLACE: pin to the latest release tag or commit SHA.
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@0954c506f33472309b50bda30a48ba42a2288f12
+    with:
+      config: shipreport.yaml
+      mode: ${{ inputs.mode || 'run' }}
+      # JSON-array string. The reusable workflow's fromJSON path handles it.
+      runs_on: '["self-hosted","linux","shipreport"]'
+      # REPLACE: same pin as the `uses:` ref above.
+      shipreport_ref: 0954c506f33472309b50bda30a48ba42a2288f12
+    secrets:
+      shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
+      shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}

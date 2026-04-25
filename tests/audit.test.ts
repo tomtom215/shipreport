@@ -129,6 +129,31 @@ describe("AuditLog", () => {
     state.close();
   });
 
+  it("tail(limit, since) filters by `at >= since`", async () => {
+    const { log, state } = await freshLog();
+    const a = log.append({ actor: "a", event: "run_started", target: "t1" });
+    log.append({ actor: "a", event: "run_completed", target: "t1" });
+    // Use the second row's `at` as the since cutoff — should keep only rows
+    // at or after it (here: every row but the first).
+    const rows = log.tail(50, a.at);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((r) => r.at >= a.at)).toBe(true);
+    state.close();
+  });
+
+  it("readForward(since) walks rows chronologically from a lower bound", async () => {
+    const { log, state } = await freshLog();
+    log.append({ actor: "a", event: "run_started", target: "t" });
+    const cutoff = log.append({ actor: "a", event: "run_completed", target: "t" });
+    log.append({ actor: "a", event: "report_written", target: "t" });
+    const rows = log.readForward(cutoff.at);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // All rows are at or after the cutoff, and emitted in seq-ascending order.
+    expect(rows.every((r) => r.at >= cutoff.at)).toBe(true);
+    expect(rows.map((r) => r.seq)).toEqual([...rows.map((r) => r.seq)].sort((a, b) => a - b));
+    state.close();
+  });
+
   it("canonicalization is key-order independent (same payload = same hash)", async () => {
     const { log, state } = await freshLog();
     const r1 = log.append({

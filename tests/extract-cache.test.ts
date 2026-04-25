@@ -109,4 +109,28 @@ describe("ExtractCache (SQLite round-trip)", () => {
     expect(ec.load("o/r", q1)!.prs[0]!.number).toBe(1);
     expect(ec.load("o/r", q2)!.prs[0]!.number).toBe(99);
   });
+
+  it("returns null when a stored snapshot is corrupt JSON (graceful cold-cache)", () => {
+    const ec = new ExtractCache(cache);
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    cache.setExtractSnapshot(snapshotKey("o/r", q), "{not json");
+    expect(ec.load("o/r", q)).toBeNull();
+  });
+
+  it("returns null when a stored checkpoint is corrupt JSON", () => {
+    const ec = new ExtractCache(cache);
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    cache.setCheckpoint(snapshotKey("o/r", q), "cur", "{not json");
+    expect(ec.loadCheckpoint("o/r", q)).toBeNull();
+  });
+
+  it("treats a stored snapshot with an unknown schemaVersion as cold", () => {
+    const ec = new ExtractCache(cache);
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    cache.setExtractSnapshot(
+      snapshotKey("o/r", q),
+      JSON.stringify({ schemaVersion: 999, repo: "o/r", quarterLabel: "2026Q1", tz: "UTC", lastSeenUpdatedAt: null, prs: [] }),
+    );
+    expect(ec.load("o/r", q)).toBeNull();
+  });
 });
