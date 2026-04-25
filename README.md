@@ -399,8 +399,9 @@ docker run --rm \
   shipreport run --config /cfg/shipreport.yaml --all
 ```
 
-Add `--build-arg WITH_PDF=1` to install Chromium + puppeteer for PDF output
-(~400 MB larger). Omit the flag to keep the image at ~150 MB.
+Add `--build-arg WITH_PDF=1` to install Chromium + puppeteer for PDF
+output (~250-300 MB larger; total ~400-450 MB image). Omit the flag to
+keep the image at ~150 MB.
 
 ### Scheduled GitHub Action (recommended)
 
@@ -471,7 +472,9 @@ src/
 └── templates/           # success-story, team-summary, manager-rollup .eta
 ```
 
-No native dependencies anywhere. `node:sqlite` is stable in Node 24.
+No native dependencies anywhere. `node:sqlite` is unflagged in Node
+22.13+ / 23.4+ and reached release-candidate stability in Node 25.7.
+shipreport supports Node `>=22.13.0` per `package.json`.
 
 ### CI gates
 

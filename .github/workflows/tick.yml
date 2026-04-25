@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Detect operator config
         id: detect
@@ -71,10 +71,10 @@ jobs:
           echo "::error title=No shipreport.yaml::You dispatched this workflow manually but no shipreport.yaml was found at the repo root. Add one (see examples/shipreport.yaml) and try again."
           exit 1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         if: steps.detect.outputs.present == 'true'
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: steps.detect.outputs.present == 'true'
         with:
           node-version: 24
@@ -89,7 +89,7 @@ jobs:
       # branch: cache miss → treated as "never run" and everything schedules.
       # Per-branch keying so a fork's state doesn't bleed into the upstream
       # mirror or vice versa.
-      - uses: actions/cache@v5
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         id: state-cache
         if: steps.detect.outputs.present == 'true'
         with:
@@ -103,12 +103,21 @@ jobs:
       # Preflight on every invocation: cheap (no extract) and turns "wrong
       # secret name" / "expired PAT" / "App not installed on org" into a
       # readable error before we burn quota on a real extract.
+      #
+      # `--offline` skips the auth + GraphQL probes for dry-run mode so
+      # operators iterating on classification rules without a token still
+      # get a useful preflight (schema + cron + optional-deps validation).
       - name: Preflight (doctor)
         if: steps.detect.outputs.present == 'true'
         env:
           SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
           SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
-        run: node bin/shipreport.js doctor --config shipreport.yaml
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "dry-run" ]; then
+            node bin/shipreport.js doctor --config shipreport.yaml --offline
+          else
+            node bin/shipreport.js doctor --config shipreport.yaml
+          fi
 
       - name: Doctor-only mode (manual dispatch)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'doctor' && steps.detect.outputs.present == 'true' }}
@@ -158,7 +167,7 @@ jobs:
             ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }}
 
       - name: Upload reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() && steps.detect.outputs.present == 'true' && hashFiles('out/**/*') != '' }}
         with:
           name: shipreport-${{ github.run_id }}
@@ -167,7 +176,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload audit tail
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() && steps.detect.outputs.present == 'true' }}
         with:
           name: shipreport-audit-${{ github.run_id }}

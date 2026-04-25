@@ -1,25 +1,32 @@
 # shipreport — Quarterly engineering success story generator.
-# Slim image, no native deps (Node 24 ships stable SQLite). ~150MB.
+# Slim image, no native deps (Node 24 ships stable SQLite). ~150 MB.
 #
-# Base image is pinned by digest so supply-chain provenance is deterministic.
-# .github/dependabot.yml bumps this pin weekly; resolve the current digest
-# locally with:
-#   docker pull node:24-alpine
-#   docker inspect --format='{{index .RepoDigests 0}}' node:24-alpine
-FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS build
-# NOTE: digest above is a placeholder; dependabot resolves it on first
-# weekly scan. If you're cutting a release before dependabot has run,
-# replace the digest manually using the command above.
+# Pinning policy:
+#   * Base image is `node:24-alpine` (matches package.json's
+#     `engines.node: ">=24.0.0"` and CI's `node-version: 24`).
+#   * The digest below is the multi-arch manifest list for `node:24-alpine`
+#     as of 2026-04-16. Resolve a fresh digest yourself before cutting a
+#     release with:
+#       docker buildx imagetools inspect node:24-alpine | grep '^Digest'
+#     OR for a single arch:
+#       docker pull node:24-alpine
+#       docker inspect --format='{{index .RepoDigests 0}}' node:24-alpine
+#   * .github/dependabot.yml refreshes the digest weekly.
+#   * Reproducibility: a CI build that pulls a different digest than the
+#     one pinned here will fail, surfacing supply-chain drift.
+ARG NODE_BASE=node:24-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f
+
+FROM ${NODE_BASE} AS build
 
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
-RUN corepack enable && pnpm install --no-frozen-lockfile --prod=false
+RUN corepack enable && pnpm install --frozen-lockfile --prod=false
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
 RUN pnpm build
 
-FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4
+FROM ${NODE_BASE}
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -30,15 +37,15 @@ ENV NODE_ENV=production
 RUN addgroup -S shipreport && adduser -S -G shipreport -u 10001 shipreport
 
 COPY package.json pnpm-lock.yaml* ./
-RUN corepack enable && pnpm install --prod --no-frozen-lockfile \
+RUN corepack enable && pnpm install --frozen-lockfile --prod \
  && rm -rf /root/.local/share/pnpm/store ~/.pnpm-store
 
 COPY --from=build /app/dist ./dist
 COPY bin ./bin
 
-# PDF output needs puppeteer + chromium; install with:
+# PDF output needs puppeteer + Chromium. Install with:
 #   docker build --build-arg WITH_PDF=1 -t shipreport:pdf .
-# (Leaves image ~400MB larger.)
+# Adds ~250 MB (apk Chromium + nss + freetype + harfbuzz + ttf-freefont).
 ARG WITH_PDF=0
 RUN if [ "$WITH_PDF" = "1" ]; then \
       apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont \
@@ -50,7 +57,8 @@ RUN if [ "$WITH_PDF" = "1" ]; then \
 RUN mkdir -p /home/shipreport/.local/share/shipreport \
            /home/shipreport/.cache/shipreport \
            /home/shipreport/.config/shipreport \
- && chown -R shipreport:shipreport /app /home/shipreport
+ && chown -R shipreport:shipreport /app /home/shipreport \
+ && chmod 0700 /home/shipreport/.config/shipreport
 
 USER shipreport
 ENV HOME=/home/shipreport
@@ -60,6 +68,12 @@ ENV HOME=/home/shipreport
 # If you don't, the audit log starts empty on every run and the scheduler
 # treats every team as "never run".
 VOLUME ["/home/shipreport/.local/share/shipreport", "/home/shipreport/.cache/shipreport"]
+
+# OCI image labels — make `docker inspect` informative for compliance.
+LABEL org.opencontainers.image.title="shipreport" \
+      org.opencontainers.image.description="Quarterly engineering success story generator." \
+      org.opencontainers.image.source="https://github.com/tomtom215/shipreport" \
+      org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["node", "bin/shipreport.js"]
 CMD ["--help"]

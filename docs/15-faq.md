@@ -65,10 +65,15 @@ TypeScript union just keeps callers honest.
 
 Don't disable it in any environment that's under compliance scrutiny.
 
-## Does shipreport work on Node ≤ 23?
+## What Node versions does shipreport support?
 
-No. We require Node 24 for stable `node:sqlite`. If your runner pins to
-an older Node, run shipreport via Docker.
+`engines.node` is `>=22.13.0`. That's where `node:sqlite` was unflagged
+(also v23.4.0); the module is still marked experimental upstream but
+the API surface shipreport uses is stable. CI runs the matrix on Node
+22.13, 24, and 26. The `engine-strict=true` setting in `.npmrc` makes
+`pnpm install` refuse older runtimes at install time. If your runner
+pins to an older Node, run shipreport via Docker (the bundled image
+uses `node:24-alpine`).
 
 ## Can I use shipreport to score people for performance reviews?
 

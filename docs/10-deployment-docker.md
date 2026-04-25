@@ -25,8 +25,12 @@ parts.
 * `ENTRYPOINT ["node", "bin/shipreport.js"]` — pass any subcommand as
   the docker `CMD`.
 
-`--build-arg WITH_PDF=1` adds Chromium + puppeteer for PDF/PNG output
-(~400 MB larger).
+`--build-arg WITH_PDF=1` adds Chromium + puppeteer for PDF/PNG output.
+The exact delta depends on the Chromium version pulled by Alpine apk; on
+the current `node:24-alpine` base it adds approximately 250-300 MB
+(`chromium`, `nss`, `freetype`, `harfbuzz`, `ttf-freefont`,
+`ca-certificates` plus the puppeteer JS package). The original ~150 MB
+image therefore grows to ~400-450 MB.
 
 ## Build
 
@@ -97,23 +101,108 @@ Plus the bind mount for the config file (read-only) and the output dir.
 A `:ro` mount on the config is recommended — shipreport never writes to
 its config and the read-only flag stops accidental edits.
 
-## Air-gapped / offline registries
+## Air-gapped / offline registries — concrete recipe
 
-If you can't pull `node:25-alpine` from Docker Hub:
+Air-gapped means: the container host (and the build host, if separate)
+have **no public Internet egress**. They can only reach an internal
+registry, an internal npm mirror, and your GHES instance. Below is the
+end-to-end recipe.
 
-1. Pull the upstream image to an internet-connected host:
-   `docker pull node:25-alpine@sha256:<digest>`
-2. Re-tag and push to your internal registry:
-   `docker tag node:25-alpine@sha256:<digest> registry.internal/node:25-alpine`
-   `docker push registry.internal/node:25-alpine`
-3. Build with a custom Dockerfile that swaps the FROM line:
-   `FROM registry.internal/node:25-alpine`
+### Step 1 — On a transit host (one-time)
 
-For the npm dependencies, either:
+A transit host is anywhere with both public Internet AND access to your
+internal registry. You'll mirror three things:
 
-* Bake them into the image (the bundled Dockerfile already does this), or
-* Mirror `registry.npmjs.org` in your registry and override
-  `NPM_CONFIG_REGISTRY=https://registry.internal/repository/npm/`.
+```bash
+# 1. The pinned base image. Resolve the digest first to avoid
+#    silently re-mirroring whatever `node:24-alpine` happens to point at.
+DIGEST="sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f"
+docker pull "node:24-alpine@$DIGEST"
+docker tag  "node:24-alpine@$DIGEST" registry.internal/node:24-alpine
+docker push registry.internal/node:24-alpine
+
+# 2. (Optional) the published shipreport image, if you'd rather use it
+#    than build from source.
+SHIPREPORT_DIGEST="sha256:<resolve via crane digest ghcr.io/tomtom215/shipreport:v0.2.0>"
+docker pull "ghcr.io/tomtom215/shipreport:v0.2.0@$SHIPREPORT_DIGEST"
+docker tag  "ghcr.io/tomtom215/shipreport:v0.2.0@$SHIPREPORT_DIGEST" \
+            registry.internal/shipreport:v0.2.0
+docker push registry.internal/shipreport:v0.2.0
+
+# 3. The npm packages. Two patterns work — pick one.
+#
+#    Pattern (a): use Verdaccio/Sonatype Nexus/JFrog Artifactory as a
+#    proxying npm registry. Configure it to proxy registry.npmjs.org
+#    (the transit host fetches once; subsequent installs come from the
+#    cache). On the build host, set:
+#       NPM_CONFIG_REGISTRY=https://registry.internal/repository/npm/
+#
+#    Pattern (b): bake deps into a base image so the build host needs
+#    NO npm registry at all. On the transit host:
+#       cd shipreport-source/
+#       pnpm install --frozen-lockfile --prod
+#       tar -czf shipreport-deps.tgz node_modules/ pnpm-lock.yaml
+#    Then ship the tarball to the build host (USB / one-way diode /
+#    your standard data-import path).
+```
+
+### Step 2 — On the air-gapped build host
+
+Patch the Dockerfile's base reference and (if using pattern b) skip
+`pnpm install`:
+
+```dockerfile
+# Override via build-arg so the upstream Dockerfile is unchanged.
+# docker build --build-arg NODE_BASE=registry.internal/node:24-alpine ...
+ARG NODE_BASE=registry.internal/node:24-alpine
+FROM ${NODE_BASE} AS build
+# ... rest of the upstream Dockerfile ...
+```
+
+Then build:
+
+```bash
+# Pattern (a): proxying npm registry
+docker build \
+  --build-arg NODE_BASE=registry.internal/node:24-alpine \
+  --build-arg NPM_CONFIG_REGISTRY=https://registry.internal/repository/npm/ \
+  -t registry.internal/shipreport:custom \
+  -f docker/Dockerfile .
+
+# Pattern (b): pre-baked node_modules
+mkdir -p deps && tar -xzf shipreport-deps.tgz -C deps
+docker build \
+  --build-arg NODE_BASE=registry.internal/node:24-alpine \
+  -t registry.internal/shipreport:custom \
+  -f docker/Dockerfile.airgap .
+```
+
+Where `Dockerfile.airgap` is the bundled Dockerfile with the
+`pnpm install` line replaced by `COPY deps/node_modules /app/node_modules`
+to use the pre-staged dependency tree.
+
+### Step 3 — On the run host
+
+Same as the public-Internet recipe earlier on this page, but pull from
+the internal registry:
+
+```bash
+docker pull registry.internal/shipreport:custom
+docker run --rm \
+  -e SHIPREPORT_GITHUB_TOKEN \
+  -v "$PWD/shipreport.yaml:/cfg/shipreport.yaml:ro" \
+  -v "$PWD/out:/app/out" \
+  -v shipreport-state:/home/shipreport/.local/share/shipreport \
+  -v shipreport-cache:/home/shipreport/.cache/shipreport \
+  registry.internal/shipreport:custom run --config /cfg/shipreport.yaml --all
+```
+
+GHES is reachable from the run host; `github.baseUrl` and `graphqlUrl`
+point at it (see [05 · Auth: GHES](./05-auth-ghes.md)). Audit log export
+runs from a `shipreport audit export` cron job — see
+[11 · Local cron](./11-deployment-local-cron.md). The signed snapshots
+go into your existing WORM target via your standard pipeline; no
+GitHub-Actions involvement.
 
 ## Kubernetes CronJob
 

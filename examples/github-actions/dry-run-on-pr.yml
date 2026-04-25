@@ -3,6 +3,13 @@
 # safety net that catches operator mistakes (typos, bad cron, missing
 # repos:) BEFORE the bad config lands on main and starts firing every hour.
 #
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  REPLACE THIS PIN BEFORE COPYING TO YOUR REPO                    │
+# │  The `ref:` below must be set to a SHA (40-hex) or release tag.  │
+# │  The value below is a placeholder SHA from this branch.          │
+# │  Do NOT ship `@main` to production — see docs/14-security.md.    │
+# └──────────────────────────────────────────────────────────────────┘
+#
 # Zero secrets required. Zero permissions beyond `contents: read`.
 #
 # Pre-requisites:
@@ -28,7 +35,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: tomtom215/shipreport
-          ref: main
+          # REPLACE: pin to the latest release tag or commit SHA.
+          ref: 0954c506f33472309b50bda30a48ba42a2288f12
           path: shipreport
       - uses: pnpm/action-setup@v4
         with: { version: 10 }

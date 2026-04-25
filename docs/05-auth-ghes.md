@@ -38,11 +38,15 @@ Either PAT or App; the same trade-offs as github.com (see
 [03](./03-auth-pat.md) / [04](./04-auth-github-app.md)). A few GHES-specific
 notes:
 
-* **PAT**: GHES versions ≥3.10 support fine-grained PATs — use them.
-  Older GHES versions only have classic PATs (no per-repo scoping); in
-  that case, classic with `repo` scope is your only option.
+* **PAT**: GHES 3.10 introduced fine-grained PATs (still in beta as of
+  3.16; opt-in at the enterprise / organization level — see [GHES docs][ghes-fgpat]).
+  Use them when available. Older GHES versions only have classic PATs
+  (no per-repo scoping); in that case, classic with `repo` scope is your
+  only option, scoped tightly via repo-policy where supported.
 * **App**: GitHub Apps work identically on GHES. Create the App in
   `https://ghe.example.com/organizations/<org>/settings/apps/new`.
+
+[ghes-fgpat]: https://docs.github.com/en/enterprise-server@3.10/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens
 
 ## Runner placement
 
@@ -82,17 +86,50 @@ If outbound internet is fully blocked:
 
 GHES is sometimes deployed with a self-signed CA. shipreport uses the
 runtime's TLS verification — there's no flag to disable it (intentionally,
-to avoid CWE-295). Two recommended approaches:
+to avoid CWE-295). Two recommended approaches.
 
-* **Trust the CA at the OS level**: install your CA cert into the runner
-  / container's trust store. On Debian-based images:
-  `cp my-ca.crt /usr/local/share/ca-certificates/ && update-ca-certificates`.
-* **Use `NODE_EXTRA_CA_CERTS`**: set the env var to a PEM file path. Node
-  reads this and adds those certs to the verifier without modifying the
-  trust store.
+### Option A — `NODE_EXTRA_CA_CERTS` (simplest, GH Actions friendly)
 
-Document this in your workflow as a setup step — shipreport itself never
-disables verification.
+Store the CA in a GH Actions secret (`GHES_CA_CERT`, the literal PEM
+including `-----BEGIN/END CERTIFICATE-----` lines), then add this step
+BEFORE the shipreport step in your caller workflow:
+
+```yaml
+      - name: Stage GHES CA
+        env:
+          GHES_CA_CERT: ${{ secrets.GHES_CA_CERT }}
+        # printenv emits the secret bytes verbatim — see
+        # `audit-export.yml` for the rationale (printf '%s' would mangle
+        # any '%' in the PEM).
+        run: |
+          set -euo pipefail
+          umask 0077
+          mkdir -p "$RUNNER_TEMP/ghes-ca"
+          printenv GHES_CA_CERT > "$RUNNER_TEMP/ghes-ca/ca.pem"
+          # Make subsequent steps in the job pick it up via env-var
+          # propagation. NODE_EXTRA_CA_CERTS is read by Node at startup;
+          # setting it here means EVERY following Node invocation in
+          # the job (including shipreport's) trusts the CA.
+          echo "NODE_EXTRA_CA_CERTS=$RUNNER_TEMP/ghes-ca/ca.pem" >> "$GITHUB_ENV"
+```
+
+shipreport itself reads `NODE_EXTRA_CA_CERTS` because it just runs as a
+Node process. No further configuration is needed.
+
+### Option B — OS trust store (for Docker / self-hosted runners)
+
+If you control the runner image:
+
+```dockerfile
+COPY ghes-ca.crt /usr/local/share/ca-certificates/ghes-ca.crt
+RUN update-ca-certificates
+```
+
+(Adjust paths for Alpine / RHEL — Alpine uses `/usr/local/share/
+ca-certificates/` plus `update-ca-certificates`; RHEL/Fedora uses
+`/etc/pki/ca-trust/source/anchors/` plus `update-ca-trust extract`.)
+
+shipreport never disables verification.
 
 ## Verify
 

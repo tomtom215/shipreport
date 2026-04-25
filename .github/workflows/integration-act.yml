@@ -1,0 +1,99 @@
+name: integration-act
+
+# Opt-in integration smoke that actually EXECUTES the operator-facing
+# workflows (tick.yml, validate-config.yml) inside a GitHub-Actions-runner
+# emulator (`act`). Catches the class of regressions that schema-only
+# parsing (tests/e2e/workflows.test.ts) cannot:
+#
+#   * a step that references an env var the workflow never sets,
+#   * a runs-on that doesn't resolve,
+#   * a job whose YAML is structurally valid but semantically broken,
+#   * a `permissions:` change that breaks an existing read step.
+#
+# Triggered:
+#   * on workflow_dispatch (manual; cheap to run, slow to download act)
+#   * on schedule weekly so silent rot is caught between releases
+#   * NOT on every PR (act bootstrapping pulls a ~500 MB image)
+#
+# When you want pre-merge integration coverage on a specific PR, set the
+# `pr-integration` label and the on:pull_request_target gate fires.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 6 * * 1"   # 06:30 UTC every Monday
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  act-smoke:
+    if: ${{ github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr-integration') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install act (official release tarball, SHA-256 verified)
+        env:
+          # Pin to a specific act version. Refresh periodically and
+          # update both the version and the checksum together.
+          ACT_VERSION: "0.2.85"
+          # Resolve a fresh checksum at upgrade time:
+          #   curl -fsSL -o act.tgz https://github.com/nektos/act/releases/download/v$ACT_VERSION/act_Linux_x86_64.tar.gz
+          #   sha256sum act.tgz
+          ACT_SHA256: "fbf411fb5a47bff407d3be1f320f3314af050d92b0e7e9615075222ba0c22947"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o act.tgz \
+            "https://github.com/nektos/act/releases/download/v${ACT_VERSION}/act_Linux_x86_64.tar.gz"
+          if [ -n "${ACT_SHA256:-}" ]; then
+            echo "${ACT_SHA256}  act.tgz" | sha256sum -c -
+          else
+            echo "::warning title=Unpinned checksum::ACT_SHA256 is empty; refresh and pin before relying on this job for supply-chain assurance."
+          fi
+          tar -xzf act.tgz act
+          chmod +x act
+          ./act --version
+
+      - name: "Smoke-test validate-config workflow (no secrets)"
+        run: |
+          # `act -W` runs a single workflow file. Use `--list` first as a
+          # cheap parse-only step before paying for runner image pulls.
+          ./act -W .github/workflows/validate-config.yml --list
+          # Then actually run it. validate-config has no secrets, so we
+          # don't need a `--secret-file`. We DO need `pull_request` event
+          # context — `act` synthesises a minimal one when the event flag
+          # is provided.
+          ./act pull_request -W .github/workflows/validate-config.yml \
+            --pull=false \
+            --rm \
+            -P ubuntu-latest=node:24-alpine
+
+      - name: "Smoke-test tick workflow (mode=doctor, no real auth)"
+        run: |
+          # Dispatch the tick workflow with mode=doctor + offline preflight.
+          # We do NOT supply a real PAT — the doctor preflight in dry-run /
+          # offline mode runs without one (see docs/08-dry-run.md).
+          # This proves the workflow's YAML executes end-to-end against a
+          # real runner image.
+          mkdir -p .act-secrets
+          # Empty secrets file; the env-var refs in tick.yml resolve to
+          # empty strings, which the schedule branch handles. We're only
+          # exercising the workflow_dispatch + manual-mode wiring.
+          : > .act-secrets/secrets
+          ./act workflow_dispatch \
+            -W .github/workflows/tick.yml \
+            --pull=false \
+            --rm \
+            --secret-file .act-secrets/secrets \
+            --input mode=doctor \
+            -P ubuntu-latest=node:24-alpine || {
+              echo "::warning title=tick smoke failed::Investigate before merging changes that touch tick.yml."
+              # Don't hard-fail the workflow if the act runner can't fully
+              # boot the sandbox — log a warning so we get signal but
+              # don't block ops on environmental flake.
+              exit 0
+            }

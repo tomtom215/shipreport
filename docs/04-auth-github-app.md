@@ -135,13 +135,18 @@ the App+installation identity, never the token bytes.
 
 ## Rotating the private key
 
-GitHub allows an App to hold up to two valid private keys at once.
-Zero-downtime rotation:
+GitHub Apps support up to **25 simultaneous valid private keys** ([GitHub
+docs][gh-app-keys]). Zero-downtime rotation:
 
 1. App settings → **Private keys → Generate a private key**.
 2. Copy the new PEM into `SHIPREPORT_APP_PRIVATE_KEY`.
 3. Run the workflow in `mode: doctor` — confirms the new key works.
 4. App settings → revoke the old key.
+
+Private keys do not expire automatically; they must be manually revoked.
+Plan a quarterly rotation cadence regardless.
+
+[gh-app-keys]: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps
 
 ## Common pitfalls
 

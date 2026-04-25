@@ -1,4 +1,4 @@
-import { defineCommand, runMain } from "citty";
+import { defineCommand } from "citty";
 import { loadConfig, resolveHome, selectTeams } from "./config.js";
 import { Cache } from "./cache.js";
 import { exportJsonl } from "./audit-export.js";
@@ -113,6 +113,11 @@ const preview = defineCommand({
     team: { type: "string", required: true, description: "Team name" },
     member: { type: "string", required: true },
     quarter: { type: "string" },
+    dryRun: {
+      type: "boolean",
+      description: "Don't hit the network; fail if cache is cold",
+      default: false,
+    },
     verbose: { type: "boolean", alias: "v", default: false },
   },
   async run({ args }) {
@@ -132,6 +137,7 @@ const preview = defineCommand({
       overrideQuarter: args.quarter,
       log,
       triggeredBy: "manual",
+      dryRun: args.dryRun,
     });
     for (const p of r.written) {
       if (p.endsWith(".md") && p.includes(`${args.member}-`)) {
@@ -387,24 +393,42 @@ const doctor = defineCommand({
     name: "doctor",
     description: "Probe auth, reachability, optional puppeteer, state DB.",
   },
-  args: { config: { type: "string", required: true } },
+  args: {
+    config: { type: "string", required: true },
+    offline: {
+      type: "boolean",
+      description:
+        "Skip auth + network probes; validate only schema, paths, cron, and optional deps. Mirrors --dryRun's auth contract.",
+      default: false,
+    },
+  },
   async run({ args }) {
     const cfg = await loadConfig(args.config);
-    const tokenSource = await tokenSourceFromConfig(cfg);
-    const client = makeClient({
-      tokenSource,
-      baseUrl: cfg.github.baseUrl,
-      graphqlUrl: cfg.github.graphqlUrl,
-    });
-    const info = await probeToken(client);
+    const offline = args.offline === true;
 
-    console.log(`Auth kind:        ${tokenSource.kind}`);
-    console.log(`Identity:         ${tokenSource.identity}`);
-    console.log(`Authenticated as: ${info.login}`);
-    console.log(
-      `Token scopes:     ${info.scopes.join(", ") || "(fine-grained PAT or App installation)"}`,
-    );
-    console.log(`GHES version:     ${info.ghesVersion ?? "github.com"}`);
+    // Auth + network probes only run in online mode. Dry-run-only operators
+    // (no PAT, no App configured) can still get a useful preflight by
+    // passing --offline.
+    if (offline) {
+      console.log(`Auth kind:        (offline — skipped)`);
+      console.log(`Identity:         (offline — skipped)`);
+    } else {
+      const tokenSource = await tokenSourceFromConfig(cfg);
+      const client = makeClient({
+        tokenSource,
+        baseUrl: cfg.github.baseUrl,
+        graphqlUrl: cfg.github.graphqlUrl,
+      });
+      const info = await probeToken(client);
+      console.log(`Auth kind:        ${tokenSource.kind}`);
+      console.log(`Identity:         ${tokenSource.identity}`);
+      console.log(`Authenticated as: ${info.login}`);
+      console.log(
+        `Token scopes:     ${info.scopes.join(", ") || "(fine-grained PAT or App installation)"}`,
+      );
+      console.log(`GHES version:     ${info.ghesVersion ?? "github.com"}`);
+    }
+
     console.log(`Base URL:         ${cfg.github.baseUrl}`);
     console.log(`Cache path:       ${resolveHome(cfg.cache.path)}`);
     console.log(`Audit enabled:    ${cfg.audit.enabled}`);
@@ -437,7 +461,11 @@ const doctor = defineCommand({
   },
 });
 
-const main = defineCommand({
+// The exported `main` is the citty root command. The actual binary entry
+// is in src/cli-main.ts (single-line: import { main } from "./cli.js";
+// runMain(main);) so importing this file under test does NOT invoke
+// runMain and hijack the test process's argv.
+export const main = defineCommand({
   meta: {
     name: "shipreport",
     version: "0.2.0",
@@ -453,4 +481,17 @@ const main = defineCommand({
   },
 });
 
-runMain(main);
+// Exported for unit tests so the citty `run` handler of each subcommand
+// can be invoked directly (without spawning a subprocess and without
+// running the binary's main dispatcher).
+export const __testables = {
+  run,
+  preview,
+  scheduleTick,
+  auditTail,
+  auditVerify,
+  auditExport,
+  auditSnapshot,
+  cachePrune,
+  doctor,
+};

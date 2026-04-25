@@ -1,0 +1,103 @@
+# Example caller workflow — quarterly run, runs a published, signed,
+# digest-pinned shipreport image. SLSA L3-friendly: zero npm-installs at
+# run time, the image digest is in the workflow file (not a moving tag),
+# and cosign verification is run before the image is invoked.
+#
+# Use this pattern when:
+#   * compliance forbids live npm-registry access at run time,
+#   * you want to verify a Sigstore signature on every run,
+#   * you maintain shipreport across many orgs and want a single anchor.
+#
+# Required:
+#   * `shipreport.yaml` at the repo root.
+#   * Secret SHIPREPORT_TOKEN (PAT) or SHIPREPORT_APP_PRIVATE_KEY (App).
+#
+# REPLACE THE DIGEST below before merging. Resolve a fresh digest with:
+#   crane digest ghcr.io/tomtom215/shipreport:v0.2.0
+#   # OR
+#   docker buildx imagetools inspect ghcr.io/tomtom215/shipreport:v0.2.0 \
+#     | grep '^Digest:'
+#
+# Verify the signature locally before pinning:
+#   cosign verify ghcr.io/tomtom215/shipreport:v0.2.0 \
+#     --certificate-identity-regexp 'https://github.com/tomtom215/shipreport/.+' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+name: shipreport-quarterly-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | doctor"
+        required: false
+        default: "run"
+  schedule:
+    - cron: "0 14 1 1,4,7,10 *"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  shipreport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # REPLACE: digest pinning is the entire point of this pattern.
+      # The `tag@digest` form ensures docker run pulls EXACTLY this
+      # image even if the tag is later moved.
+      SHIPREPORT_IMAGE: ghcr.io/tomtom215/shipreport:v0.2.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            shipreport-state
+            shipreport-cache
+          key: shipreport-state-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            shipreport-state-${{ github.ref_name }}-
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify image signature (Sigstore keyless)
+        run: |
+          cosign verify "${SHIPREPORT_IMAGE}" \
+            --certificate-identity-regexp 'https://github.com/tomtom215/shipreport/.+' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+      - name: Pull image
+        run: docker pull "${SHIPREPORT_IMAGE}"
+
+      - name: Run shipreport
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+          MODE: ${{ inputs.mode || 'run' }}
+        run: |
+          mkdir -p shipreport-state shipreport-cache out
+          # Build the command-line for the container's ENTRYPOINT.
+          set -- run --config /cfg/shipreport.yaml --all
+          [ "$MODE" = "dry-run" ] && set -- "$@" --dryRun
+          if [ "$MODE" = "doctor" ]; then
+            set -- doctor --config /cfg/shipreport.yaml
+          fi
+          docker run --rm \
+            -e SHIPREPORT_GITHUB_TOKEN \
+            -e SHIPREPORT_APP_PRIVATE_KEY \
+            -v "${{ github.workspace }}/shipreport.yaml:/cfg/shipreport.yaml:ro" \
+            -v "${{ github.workspace }}/out:/app/out" \
+            -v "${{ github.workspace }}/shipreport-state:/home/shipreport/.local/share/shipreport" \
+            -v "${{ github.workspace }}/shipreport-cache:/home/shipreport/.cache/shipreport" \
+            "${SHIPREPORT_IMAGE}" "$@"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && hashFiles('out/**/*') != '' }}
+        with:
+          name: shipreport-${{ github.run_id }}
+          path: out/
+          retention-days: 90

@@ -1,11 +1,10 @@
 /**
  * E2E for scripts/validate-config.mjs — the script the validate-config.yml
  * GH workflow runs on every PR. It depends on `pnpm build` having run
- * (it loads from dist/), so we skip cleanly if dist/ isn't available
- * (e.g. on a fresh checkout where someone runs `pnpm test` before
- * `pnpm build`).
+ * (it loads from dist/). If dist/ is missing we build inline rather than
+ * silently skipping, so a green test always means the script was exercised.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
@@ -18,9 +17,20 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPT = path.join(ROOT, "scripts", "validate-config.mjs");
 const DIST_CONFIG = path.join(ROOT, "dist", "config.js");
 
-const distAvailable = (): boolean => existsSync(DIST_CONFIG);
+beforeAll(async () => {
+  if (existsSync(DIST_CONFIG)) return;
+  // Build once for the whole suite. `pnpm build` is idempotent; we'd
+  // rather pay 5s here than have the test silently skip and lie about
+  // green coverage. Timeout matches the build's typical worst case.
+  await exec("pnpm", ["build"], { cwd: ROOT, timeout: 60_000 });
+  if (!existsSync(DIST_CONFIG)) {
+    throw new Error(
+      `dist/config.js still missing after \`pnpm build\` — refusing to skip.`,
+    );
+  }
+}, 90_000);
 
-describe.skipIf(!distAvailable())("validate-config.mjs (requires `pnpm build` first)", () => {
+describe("validate-config.mjs", () => {
   it("accepts the annotated example shipreport.yaml", async () => {
     const cfg = path.join(ROOT, "examples", "shipreport.yaml");
     const { stdout } = await exec("node", [SCRIPT, cfg]);
@@ -113,7 +123,7 @@ describe.skipIf(!distAvailable())("validate-config.mjs (requires `pnpm build` fi
   });
 });
 
-describe("validate-config.mjs script file is present and executable", () => {
+describe("validate-config.mjs script file metadata", () => {
   it("file exists and starts with a node shebang", async () => {
     const s = await stat(SCRIPT);
     expect(s.isFile()).toBe(true);

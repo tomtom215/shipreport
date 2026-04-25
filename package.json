@@ -7,7 +7,8 @@
     "shipreport": "bin/shipreport.js"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=22.13.0",
+    "pnpm": ">=10.0.0"
   },
   "files": [
     "bin",

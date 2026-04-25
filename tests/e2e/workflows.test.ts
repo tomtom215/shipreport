@@ -69,27 +69,27 @@ describe("GitHub Actions workflow structure", () => {
     }
   });
 
-  it("every `uses:` step pins to a specific tag (no @main / @master / @branch)", async () => {
+  it("every `uses:` step pins to a 40-hex commit SHA (SLSA-grade supply-chain anchor)", async () => {
     const workflows = await loadWorkflows(path.join(ROOT, ".github", "workflows"));
     const offenders: string[] = [];
+    // SHA40 = exactly 40 lowercase hex chars. The `# vX.Y.Z` trailer is
+    // optional but encouraged so a human can read the version at a glance.
+    const SHA40_PIN = /^[\w./-]+@[a-f0-9]{40}(\s+#\s*v[\w.-]+)?$/;
     for (const { file, doc } of workflows) {
       for (const [name, job] of Object.entries(doc.jobs ?? {})) {
-        // workflow_call jobs have a top-level `uses:`, not steps.
+        // Top-level workflow_call `uses:` (caller workflows reference
+        // shipreport's reusable workflow). Pinning policy is enforced
+        // separately on caller examples — see the next test.
         if (typeof job.uses === "string") continue;
         for (const step of job.steps ?? []) {
           if (!step.uses) continue;
-          // Allow @vN and @vN.N.N and @sha (40-hex). Reject @main, @master, @latest.
-          if (
-            step.uses.includes("@main") ||
-            step.uses.includes("@master") ||
-            step.uses.includes("@latest")
-          ) {
+          if (!SHA40_PIN.test(step.uses)) {
             offenders.push(`${path.relative(ROOT, file)}: ${name} -> ${step.uses}`);
           }
         }
       }
     }
-    expect(offenders, offenders.join("\n")).toEqual([]);
+    expect(offenders.join("\n"), offenders.join("\n")).toEqual("");
   });
 
   it("examples/github-actions caller workflows reference the in-repo reusable workflow", async () => {

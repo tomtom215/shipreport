@@ -47,12 +47,21 @@ on:
         type: string
         default: ""
       shipreport_ref:
-        description: "Branch / tag / SHA to check shipreport's source out at"
-        required: false
+        description: |
+          REQUIRED. Branch / tag / SHA to check shipreport's source out at.
+          Pin to a commit SHA (40-hex) for SLSA-grade reproducibility, or
+          to a release tag (e.g. v0.2.0) for less-strict supply chains.
+          Floating refs (main, master, latest) are accepted but strongly
+          discouraged — workflow_run logs will warn when one is used.
+        required: true
         type: string
-        default: "main"
       runs_on:
-        description: "Runner label (override for self-hosted GHES setups)"
+        description: |
+          Runner selector. Pass a single label string (e.g. "ubuntu-latest")
+          OR a JSON array string (e.g. '["self-hosted","linux","shipreport"]').
+          The workflow parses the JSON form via fromJSON before assigning to
+          runs-on, so both forms route correctly without GitHub having to
+          guess. See examples/github-actions/ghes-self-hosted.yml.
         required: false
         type: string
         default: "ubuntu-latest"
@@ -68,8 +77,33 @@ on:
         required: false
 
 jobs:
+  # Decode the runs_on input once. If it begins with `[`, treat it as a JSON
+  # array; otherwise pass through as a single label. This avoids the
+  # ambiguity of GitHub silently failing on a JSON-string-where-array-expected
+  # mismatch in `runs-on:`.
+  resolve-runner:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      runs_on: ${{ steps.r.outputs.value }}
+    steps:
+      - id: r
+        env:
+          INPUT: ${{ inputs.runs_on }}
+        run: |
+          if [ "${INPUT:0:1}" = "[" ]; then
+            # JSON array form. fromJSON-friendly.
+            echo "value=$INPUT" >> "$GITHUB_OUTPUT"
+          else
+            # Single-label form. Wrap as a one-element JSON array so the
+            # downstream `fromJSON` is uniform.
+            printf 'value=["%s"]\n' "$INPUT" >> "$GITHUB_OUTPUT"
+          fi
+
   run:
-    runs-on: ${{ inputs.runs_on }}
+    needs: resolve-runner
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -78,20 +112,29 @@ jobs:
       # caller's shipreport.yaml. The simplest pattern is: check shipreport
       # out at /opt/shipreport, the caller's repo at the workspace root.
       - name: Check out caller repo (for shipreport.yaml)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           path: caller
 
+      - name: Warn if shipreport_ref is a floating ref
+        run: |
+          ref="${{ inputs.shipreport_ref }}"
+          case "$ref" in
+            main|master|latest|HEAD)
+              echo "::warning title=Floating shipreport_ref::You passed shipreport_ref='$ref'. Pin to a SHA or release tag for reproducibility — see examples/github-actions/."
+              ;;
+          esac
+
       - name: Check out shipreport source
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: tomtom215/shipreport
           ref: ${{ inputs.shipreport_ref }}
           path: shipreport
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
@@ -103,7 +146,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.local/share/shipreport
@@ -112,12 +155,24 @@ jobs:
           restore-keys: |
             shipreport-state-${{ github.repository }}-${{ github.ref_name }}-
 
+      # `doctor` resolves auth before anything else. Dry-run callers may
+      # legitimately have no token configured (offline cache iteration), so
+      # for `mode: dry-run` we pass --offline; doctor then validates the
+      # schema, paths, and crons but skips the auth + GraphQL probes.
+      # `mode: doctor` is the only case where the preflight is the actual
+      # work — it runs as a non-offline doctor.
       - name: Preflight (doctor)
         env:
           SHIPREPORT_GITHUB_TOKEN: ${{ secrets.shipreport_token }}
           SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.shipreport_app_private_key }}
         working-directory: caller
-        run: node ${{ github.workspace }}/shipreport/bin/shipreport.js doctor --config ${{ inputs.config }}
+        run: |
+          BIN="${{ github.workspace }}/shipreport/bin/shipreport.js"
+          if [ "${{ inputs.mode }}" = "dry-run" ]; then
+            node "$BIN" doctor --config ${{ inputs.config }} --offline
+          else
+            node "$BIN" doctor --config ${{ inputs.config }}
+          fi
 
       - name: Execute mode
         env:
@@ -155,7 +210,7 @@ jobs:
               ;;
           esac
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() && hashFiles('caller/out/**/*') != '' }}
         with:
           name: shipreport-${{ github.run_id }}
