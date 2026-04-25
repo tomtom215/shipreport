@@ -38,7 +38,7 @@ All notable changes are recorded here. Format: [Keep a Changelog
 - `package.json`: `engines.node` lowered from `>=24.0.0` to `>=22.13.0`
   to match where `node:sqlite` is unflagged. `engine-strict=true` added
   via `.npmrc` so the constraint is enforced at install time.
-- CI test matrix expanded to Node `22.13`, `24`, `26`.
+- CI test matrix expanded to Node `22.13`, `24`, `25`.
 - `lint-workflows` job now uses the official `rhysd/actionlint` binary
   (verified by SHA-256), not the third-party `raven-actions/actionlint`
   wrapper.

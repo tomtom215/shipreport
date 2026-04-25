@@ -16,7 +16,7 @@ pnpm test:coverage     # vitest with v8 coverage; gates on the floors in vitest.
 pnpm build             # tsc + copy templates → dist/
 ```
 
-CI runs the same gates plus a Node-version matrix (`22.13`, `24`, `26`),
+CI runs the same gates plus a Node-version matrix (`22.13`, `24`, `25`),
 `pnpm audit --prod --audit-level=high`, actionlint (official binary),
 markdownlint over `docs/` and `examples/sample-output/`, and
 `scripts/validate-config.mjs` over both checked-in example configs.

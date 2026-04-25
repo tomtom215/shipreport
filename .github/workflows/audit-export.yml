@@ -108,15 +108,21 @@ jobs:
       - name: Export + sign
         if: steps.detect.outputs.present == 'true'
         run: |
+          set -euo pipefail
           mkdir -p shipreport-audit
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           echo "stamp=$stamp" >> "$GITHUB_ENV"
-          since_arg=""
-          [ -n "${{ inputs.since }}" ] && since_arg="--since ${{ inputs.since }}"
+          # Build the optional --since flag as a bash array so an empty
+          # value disappears safely and a non-empty value passes as two
+          # separate argv items. Avoids shellcheck SC2086 on unquoted $var.
+          since_args=()
+          if [ -n "${{ inputs.since }}" ]; then
+            since_args=(--since "${{ inputs.since }}")
+          fi
           node bin/shipreport.js audit export \
             --config shipreport.yaml \
             --format jsonl \
-            $since_arg \
+            "${since_args[@]}" \
             > "shipreport-audit/${stamp}.jsonl"
           node bin/shipreport.js audit snapshot --config shipreport.yaml \
             > "shipreport-audit/${stamp}.snapshot.json"

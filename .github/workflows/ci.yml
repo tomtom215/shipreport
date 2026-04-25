@@ -12,13 +12,16 @@ permissions:
 jobs:
   test:
     # Matrix matches `engines.node` in package.json (>=22.13). The lowest
-    # supported version, the current LTS, and the latest GA are all run on
-    # every PR so we catch behavior drift across node:sqlite versions.
+    # supported version, the current LTS, and the latest Current release
+    # are all run on every PR so we catch behavior drift across
+    # node:sqlite versions. Bump `25` to `26` (or higher) once that major
+    # ships on the GitHub-hosted runner image — until then `setup-node`
+    # rejects unknown majors with "Unable to find Node version 'N'".
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["22.13", "24", "26"]
+        node-version: ["22.13", "24", "25"]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -68,8 +71,13 @@ jobs:
           ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
         run: |
           set -euo pipefail
-          curl -fsSL -o actionlint.tgz \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          # Retry against transient GitHub Releases 5xx / 429. Without
+          # --retry, curl fails the whole job on the first blip (exit 22
+          # for an HTTP error code).
+          curl --fail --silent --show-error --location \
+               --retry 5 --retry-delay 2 --retry-all-errors \
+               -o actionlint.tgz \
+               "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
           tar -xzf actionlint.tgz actionlint
           chmod +x actionlint

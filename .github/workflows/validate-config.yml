@@ -62,8 +62,13 @@ jobs:
           ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
         run: |
           set -euo pipefail
-          curl -fsSL -o actionlint.tgz \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          # `--retry-all-errors` covers transient 5xx / 429 from GitHub
+          # Releases that would otherwise fail this step with curl exit
+          # 22 (HTTP 4xx/5xx).
+          curl --fail --silent --show-error --location \
+               --retry 5 --retry-delay 2 --retry-all-errors \
+               -o actionlint.tgz \
+               "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
           tar -xzf actionlint.tgz actionlint
           chmod +x actionlint
