@@ -28,10 +28,14 @@ export default defineConfig({
         "src/templates/**",
       ],
       thresholds: {
-        lines: 85,
-        functions: 85,
-        branches: 85,
-        statements: 85,
+        // Locked to the levels achieved by the suite that ships with
+        // the repo. Defensive / Chromium-runtime branches are explicitly
+        // c8-ignored where unreachable from unit tests; the percentages
+        // below represent real reachable code coverage.
+        lines: 95,
+        functions: 95,
+        branches: 88,
+        statements: 95,
       },
     },
   },

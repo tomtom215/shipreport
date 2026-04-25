@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
+  loadConfig,
   normalize,
   quarterLabelToRange,
   resolveQuarter,
@@ -166,5 +170,55 @@ describe("resolveQuarter", () => {
   });
   it("rejects a malformed quarter label", () => {
     expect(() => resolveQuarter("foo" as never, "UTC")).toThrow();
+  });
+});
+
+describe("loadConfig (file-on-disk path)", () => {
+  it("reads YAML from a file and returns a normalized Config", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "shipreport-loadcfg-"));
+    const file = path.join(dir, "shipreport.yaml");
+    await writeFile(
+      file,
+      [
+        "org: acme",
+        "teams:",
+        "  - name: t",
+        "    manager: jdoe",
+        "    members: [alice]",
+        "    repos: [acme/one]",
+        "defaults:",
+        "  quarter: 2026Q1",
+        "  timezone: UTC",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const cfg = await loadConfig(file);
+    expect(cfg.org).toBe("acme");
+    expect(cfg.teams).toHaveLength(1);
+    expect(cfg.teams[0]!.repos).toEqual(["acme/one"]);
+  });
+
+  it("propagates a clear error message when the file is invalid", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "shipreport-loadcfg-bad-"));
+    const file = path.join(dir, "shipreport.yaml");
+    await writeFile(file, "org: acme\nteams: []\n", "utf8");
+    await expect(loadConfig(file)).rejects.toThrow(/Invalid shipreport config/);
+  });
+});
+
+describe("resolveHome", () => {
+  it("expands a leading ~ to the OS home directory", async () => {
+    const { resolveHome } = await import("../src/config.js");
+    const out = resolveHome("~/.config/shipreport/key.pem");
+    expect(out.startsWith("/")).toBe(true);
+    expect(out.endsWith(".config/shipreport/key.pem")).toBe(true);
+    expect(out).not.toContain("~");
+  });
+
+  it("absolutises a relative path without a leading ~", async () => {
+    const { resolveHome } = await import("../src/config.js");
+    const out = resolveHome("relative/path");
+    expect(path.isAbsolute(out)).toBe(true);
   });
 });

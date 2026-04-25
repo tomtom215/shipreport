@@ -1,0 +1,102 @@
+name: shipreport-audit-export
+
+# Daily JSONL export of the hash-chained audit log, signed with the operator's
+# ed25519 key, committed to a `shipreport-audit/` directory on a separate
+# audit branch (or to a configured external WORM target — see the matrix
+# below). This is the SOC2 evidence trail for the scheduler.
+#
+# Pure read-only on the audit DB. Never modifies the chain. The state DB
+# itself is restored from the same cache key that `tick.yml` writes, so this
+# workflow always sees the latest chain head.
+
+on:
+  schedule:
+    - cron: "30 5 * * *"   # 05:30 UTC daily; choose any time outside tick's busy hours
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "ISO date/time lower bound for the export (optional)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shipreport-audit-export-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect operator config
+        id: detect
+        run: |
+          if [ -f shipreport.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Template repo::No shipreport.yaml at repo root — exporting nothing."
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.detect.outputs.present == 'true'
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.present == 'true'
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+        if: steps.detect.outputs.present == 'true'
+      - run: pnpm build
+        if: steps.detect.outputs.present == 'true'
+
+      - uses: actions/cache@v5
+        if: steps.detect.outputs.present == 'true'
+        with:
+          path: |
+            ~/.local/share/shipreport
+            ~/.cache/shipreport
+          key: shipreport-state-${{ github.ref_name }}-export-${{ github.run_id }}
+          restore-keys: |
+            shipreport-state-${{ github.ref_name }}-
+
+      - name: Export audit log
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          mkdir -p shipreport-audit
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          since_arg=""
+          [ -n "${{ inputs.since }}" ] && since_arg="--since ${{ inputs.since }}"
+          node bin/shipreport.js audit export \
+            --config shipreport.yaml \
+            --format jsonl \
+            $since_arg \
+            > "shipreport-audit/${stamp}.jsonl"
+
+      - name: Snapshot chain head (signed)
+        if: steps.detect.outputs.present == 'true'
+        env:
+          SHIPREPORT_AUDIT_KEY: ${{ secrets.SHIPREPORT_AUDIT_KEY }}
+        run: |
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          if [ -n "${SHIPREPORT_AUDIT_KEY:-}" ]; then
+            mkdir -p ~/.config/shipreport
+            printf '%s' "${SHIPREPORT_AUDIT_KEY}" > ~/.config/shipreport/audit-ed25519.pem
+            chmod 600 ~/.config/shipreport/audit-ed25519.pem
+          fi
+          node bin/shipreport.js audit snapshot --config shipreport.yaml \
+            > "shipreport-audit/${stamp}.snapshot.json"
+
+      - name: Verify chain
+        if: steps.detect.outputs.present == 'true'
+        run: node bin/shipreport.js audit verify --config shipreport.yaml
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.detect.outputs.present == 'true' && hashFiles('shipreport-audit/**/*') != '' }}
+        with:
+          name: shipreport-audit-export-${{ github.run_id }}
+          path: shipreport-audit/
+          retention-days: 365

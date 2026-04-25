@@ -1,0 +1,46 @@
+# Example caller workflow — validate every PR that touches shipreport.yaml
+# without ever calling GitHub APIs. Pairs with the hourly tick: this is the
+# safety net that catches operator mistakes (typos, bad cron, missing
+# repos:) BEFORE the bad config lands on main and starts firing every hour.
+#
+# Zero secrets required. Zero permissions beyond `contents: read`.
+#
+# Pre-requisites:
+#   * `shipreport.yaml` at the repo root.
+
+name: shipreport-validate
+
+on:
+  pull_request:
+    paths:
+      - "shipreport.yaml"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out shipreport source (for the validator)
+        uses: actions/checkout@v4
+        with:
+          repository: tomtom215/shipreport
+          ref: main
+          path: shipreport
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: shipreport/pnpm-lock.yaml
+      - name: Install + build
+        working-directory: shipreport
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Validate shipreport.yaml
+        run: node shipreport/scripts/validate-config.mjs shipreport.yaml

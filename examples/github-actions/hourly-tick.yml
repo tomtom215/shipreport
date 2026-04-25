@@ -1,0 +1,34 @@
+# Example caller workflow — hourly cron, dispatching to per-team schedules.
+#
+# This is the recommended pattern when you have multiple teams with different
+# cadences (e.g. checkout team quarterly, platform team weekly). The hourly
+# cron is cheap; `shipreport schedule tick` reads each team's per-team cron
+# from shipreport.yaml and only runs the teams whose schedule has come due.
+#
+# Required:
+#   * `shipreport.yaml` at the repo root, with `schedule: "<cron>"` on each
+#     team you want to run automatically.
+#   * Either SHIPREPORT_TOKEN (PAT) or SHIPREPORT_APP_PRIVATE_KEY (App).
+#
+# A team's `schedule:` field uses standard 5-field cron (minute hour dom
+# month dow) — see docs/07-scheduling.md.
+
+name: shipreport-hourly-tick
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "5 * * * *"   # five-past every hour, away from common cron scheduler congestion
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+    with:
+      config: shipreport.yaml
+      mode: tick
+    secrets:
+      shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
+      shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}

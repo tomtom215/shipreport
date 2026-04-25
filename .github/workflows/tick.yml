@@ -1,8 +1,16 @@
 name: shipreport-tick
 
-# Hourly. `shipreport schedule tick` runs only teams whose cron is due since
-# their last recorded run — most hours it's a no-op. Workflow_dispatch lets
-# managers trigger ad-hoc runs from the Actions UI.
+# Hourly scheduled trigger plus on-demand dispatch. The cron is intentionally
+# coarse: `shipreport schedule tick` reads each team's per-team cron from
+# shipreport.yaml and runs only the teams whose schedule has come due since
+# their last recorded run. Most hours that's a no-op.
+#
+# This workflow is a TEMPLATE. Operators fork the repo (or copy it into their
+# own org's private repo), drop a `shipreport.yaml` at the repo root, and
+# configure the secrets listed in docs/03-auth-pat.md or
+# docs/04-auth-github-app.md. Without a config file at the repo root every
+# scheduled invocation is a clean no-op so the upstream mirror stays green.
+
 on:
   schedule:
     - cron: "0 * * * *"
@@ -12,52 +20,99 @@ on:
         description: "Team name (leave empty for --all)"
         required: false
       quarter:
-        description: "Override quarter (e.g. 2026Q2)"
+        description: "Override quarter, e.g. 2026Q2 (optional)"
         required: false
+      mode:
+        description: "Run mode"
+        required: true
+        default: "run"
+        type: choice
+        options:
+          - run         # full extract → render → write
+          - dry-run     # cache-only; fails if cache cold
+          - doctor      # auth + reachability + DB probe only
+          - preview     # render one dev's story to the job log
+      member:
+        description: "Login (preview mode only)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Prevents overlapping schedules from racing on the cached state DB if a
+  # previous run is still finishing.
+  group: shipreport-tick-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   tick:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10 }
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
 
-      # This workflow is a template: operators fork the repo and drop in
-      # their own shipreport.yaml at the root. On the upstream mirror there
-      # is no such file, so scheduled runs must no-op cleanly rather than
-      # hard-fail every hour. hashFiles() returns '' for a missing path.
       - name: Detect operator config
         id: detect
         run: |
           if [ -f shipreport.yaml ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=shipreport.yaml found::Proceeding with operator config."
           else
-            echo "No shipreport.yaml at repo root — this workflow is a template; nothing to run."
             echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Template repo::No shipreport.yaml at repo root — this workflow is a template. See docs/02-quickstart.md."
           fi
 
-      - name: Warn on manual dispatch without a config
+      # A manual dispatch with no config is operator error: surface it loudly
+      # rather than silently exiting 0.
+      - name: Fail manual dispatch without config
         if: ${{ github.event_name == 'workflow_dispatch' && steps.detect.outputs.present != 'true' }}
         run: |
-          echo "::warning title=No shipreport.yaml::You dispatched this workflow manually but no shipreport.yaml was found at the repo root. This file is operator-provided; see examples/shipreport.yaml for the expected shape."
+          echo "::error title=No shipreport.yaml::You dispatched this workflow manually but no shipreport.yaml was found at the repo root. Add one (see examples/shipreport.yaml) and try again."
           exit 1
+
+      - uses: pnpm/action-setup@v4
+        if: steps.detect.outputs.present == 'true'
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.present == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.detect.outputs.present == 'true'
+      - run: pnpm build
+        if: steps.detect.outputs.present == 'true'
 
       # Restore the scheduler/audit state DB between runs. First run on a new
       # branch: cache miss → treated as "never run" and everything schedules.
+      # Per-branch keying so a fork's state doesn't bleed into the upstream
+      # mirror or vice versa.
       - uses: actions/cache@v5
+        id: state-cache
         if: steps.detect.outputs.present == 'true'
         with:
-          path: ~/.local/share/shipreport
-          key: shipreport-state-${{ github.ref_name }}
+          path: |
+            ~/.local/share/shipreport
+            ~/.cache/shipreport
+          key: shipreport-state-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            shipreport-state-${{ github.ref_name }}-
+
+      # Preflight on every invocation: cheap (no extract) and turns "wrong
+      # secret name" / "expired PAT" / "App not installed on org" into a
+      # readable error before we burn quota on a real extract.
+      - name: Preflight (doctor)
+        if: steps.detect.outputs.present == 'true'
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+        run: node bin/shipreport.js doctor --config shipreport.yaml
+
+      - name: Doctor-only mode (manual dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'doctor' && steps.detect.outputs.present == 'true' }}
+        run: echo "Doctor probe completed — see preflight step above."
 
       - name: Scheduled tick
         if: ${{ github.event_name == 'schedule' && steps.detect.outputs.present == 'true' }}
@@ -66,31 +121,64 @@ jobs:
           SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
         run: node bin/shipreport.js schedule tick --config shipreport.yaml --verbose
 
-      - name: Manual run
-        if: ${{ github.event_name == 'workflow_dispatch' && steps.detect.outputs.present == 'true' }}
+      - name: Manual run / dry-run
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'run' || inputs.mode == 'dry-run') && steps.detect.outputs.present == 'true' }}
         env:
           SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
           SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
         run: |
+          set -e
+          dry=""
+          [ "${{ inputs.mode }}" = "dry-run" ] && dry="--dryRun"
           if [ -n "${{ inputs.team }}" ]; then
             node bin/shipreport.js run --config shipreport.yaml \
               --team "${{ inputs.team }}" \
               ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
-              --verbose
+              $dry --verbose
           else
             node bin/shipreport.js run --config shipreport.yaml --all \
               ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
-              --verbose
+              $dry --verbose
           fi
 
-      - uses: actions/upload-artifact@v4
-        if: ${{ always() && steps.detect.outputs.present == 'true' }}
+      - name: Manual preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'preview' && steps.detect.outputs.present == 'true' }}
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.SHIPREPORT_TOKEN }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${{ inputs.team }}" ] || [ -z "${{ inputs.member }}" ]; then
+            echo "::error title=Missing inputs::Preview mode requires both 'team' and 'member' inputs."
+            exit 1
+          fi
+          node bin/shipreport.js preview \
+            --config shipreport.yaml \
+            --team "${{ inputs.team }}" \
+            --member "${{ inputs.member }}" \
+            ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }}
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.detect.outputs.present == 'true' && hashFiles('out/**/*') != '' }}
         with:
           name: shipreport-${{ github.run_id }}
           path: out/
           retention-days: 90
           if-no-files-found: ignore
 
-      - name: Audit tail
+      - name: Upload audit tail
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.detect.outputs.present == 'true' }}
+        with:
+          name: shipreport-audit-${{ github.run_id }}
+          path: ~/.local/share/shipreport/state.sqlite
+          retention-days: 365
+          if-no-files-found: ignore
+
+      - name: Audit tail summary
         if: ${{ always() && steps.detect.outputs.present == 'true' }}
         run: node bin/shipreport.js audit tail --config shipreport.yaml --limit 20 || true
+
+      - name: Verify audit chain
+        if: ${{ always() && steps.detect.outputs.present == 'true' }}
+        run: node bin/shipreport.js audit verify --config shipreport.yaml || echo "::warning title=Audit chain::audit verify failed; investigate before relying on this DB for compliance."

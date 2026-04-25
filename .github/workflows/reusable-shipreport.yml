@@ -1,0 +1,164 @@
+name: reusable-shipreport
+
+# Reusable workflow callable from any repository. Operators with multiple
+# orgs (one repo per org) can keep the shipreport.yaml + secrets in each
+# org's repo and call this workflow from a single org-level template,
+# avoiding YAML duplication.
+#
+# Example caller — `.github/workflows/quarterly.yml`:
+#
+#   on:
+#     workflow_dispatch:
+#     schedule:
+#       - cron: "0 14 1 1,4,7,10 *"
+#   jobs:
+#     run:
+#       uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+#       with:
+#         config: shipreport.yaml
+#         mode: run            # or 'dry-run' / 'doctor'
+#         team: ""              # empty → --all
+#         quarter: ""
+#       secrets:
+#         shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
+#         shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: "Path to shipreport.yaml (relative to caller repo root)"
+        required: false
+        type: string
+        default: "shipreport.yaml"
+      mode:
+        description: "run | dry-run | doctor | tick"
+        required: false
+        type: string
+        default: "run"
+      team:
+        description: "Team name; empty for --all (run/dry-run only)"
+        required: false
+        type: string
+        default: ""
+      quarter:
+        description: "Override quarter, e.g. 2026Q2 (optional)"
+        required: false
+        type: string
+        default: ""
+      shipreport_ref:
+        description: "Branch / tag / SHA to check shipreport's source out at"
+        required: false
+        type: string
+        default: "main"
+      runs_on:
+        description: "Runner label (override for self-hosted GHES setups)"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+    secrets:
+      shipreport_token:
+        description: "PAT with read scopes on contents/issues/PRs/metadata/members"
+        required: false
+      shipreport_app_private_key:
+        description: "GitHub App private key in PEM form (\\n-escaped is OK)"
+        required: false
+      shipreport_audit_key:
+        description: "ed25519 private key for `audit snapshot` (PEM)"
+        required: false
+
+jobs:
+  run:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # We need shipreport's source itself (the bin entry point) plus the
+      # caller's shipreport.yaml. The simplest pattern is: check shipreport
+      # out at /opt/shipreport, the caller's repo at the workspace root.
+      - name: Check out caller repo (for shipreport.yaml)
+        uses: actions/checkout@v4
+        with:
+          path: caller
+
+      - name: Check out shipreport source
+        uses: actions/checkout@v4
+        with:
+          repository: tomtom215/shipreport
+          ref: ${{ inputs.shipreport_ref }}
+          path: shipreport
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: shipreport/pnpm-lock.yaml
+
+      - name: Install + build shipreport
+        working-directory: shipreport
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.local/share/shipreport
+            ~/.cache/shipreport
+          key: shipreport-state-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            shipreport-state-${{ github.repository }}-${{ github.ref_name }}-
+
+      - name: Preflight (doctor)
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.shipreport_token }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.shipreport_app_private_key }}
+        working-directory: caller
+        run: node ${{ github.workspace }}/shipreport/bin/shipreport.js doctor --config ${{ inputs.config }}
+
+      - name: Execute mode
+        env:
+          SHIPREPORT_GITHUB_TOKEN: ${{ secrets.shipreport_token }}
+          SHIPREPORT_APP_PRIVATE_KEY: ${{ secrets.shipreport_app_private_key }}
+          SHIPREPORT_AUDIT_KEY: ${{ secrets.shipreport_audit_key }}
+        working-directory: caller
+        run: |
+          set -e
+          BIN="${{ github.workspace }}/shipreport/bin/shipreport.js"
+          case "${{ inputs.mode }}" in
+            doctor)
+              echo "Doctor probe completed in preflight; nothing further."
+              ;;
+            tick)
+              node "$BIN" schedule tick --config ${{ inputs.config }} --verbose
+              ;;
+            run|dry-run)
+              dry=""
+              [ "${{ inputs.mode }}" = "dry-run" ] && dry="--dryRun"
+              if [ -n "${{ inputs.team }}" ]; then
+                node "$BIN" run --config ${{ inputs.config }} \
+                  --team "${{ inputs.team }}" \
+                  ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
+                  $dry --verbose
+              else
+                node "$BIN" run --config ${{ inputs.config }} --all \
+                  ${{ inputs.quarter && format('--quarter {0}', inputs.quarter) || '' }} \
+                  $dry --verbose
+              fi
+              ;;
+            *)
+              echo "::error title=Unknown mode::mode='${{ inputs.mode }}' is not run|dry-run|doctor|tick."
+              exit 2
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && hashFiles('caller/out/**/*') != '' }}
+        with:
+          name: shipreport-${{ github.run_id }}
+          path: caller/out/
+          retention-days: 90
+          if-no-files-found: ignore

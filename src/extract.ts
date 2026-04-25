@@ -286,6 +286,10 @@ async function fetchRepo(
   return { prs: merged, droppedNonDefault, cacheHits };
 }
 
+/* c8 ignore start — defensive belt-and-suspenders early-exit. The
+   fetchRepo loop already filters out-of-window PRs via `continue`, so
+   freshPRs cannot in practice contain PRs older than quarter.fromTs.
+   This branch fires only if upstream invariants are violated. */
 function oldestMerged(prs: RawPR[]): number {
   let min = Number.POSITIVE_INFINITY;
   for (const p of prs) {
@@ -295,6 +299,7 @@ function oldestMerged(prs: RawPR[]): number {
   }
   return min;
 }
+/* c8 ignore stop */
 
 function nodeToRaw(repo: string, defaultBranch: string, n: PullsNode): RawPR {
   const coAuthors = parseCoAuthors(n.mergeCommit?.message ?? null)

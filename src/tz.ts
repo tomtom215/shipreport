@@ -27,6 +27,8 @@ export function tzOffsetMs(utcMs: number, tz: string): number {
   });
   const parts = dtf.formatToParts(new Date(utcMs));
   const get = (t: string): number =>
+    /* c8 ignore next — defensive `?? "0"` for an Intl response missing
+       a part; in practice Intl always emits all requested fields. */
     Number(parts.find((p) => p.type === t)?.value ?? "0");
   // Intl sometimes reports "24" for midnight; normalise.
   const h = get("hour");
@@ -34,6 +36,7 @@ export function tzOffsetMs(utcMs: number, tz: string): number {
     get("year"),
     get("month") - 1,
     get("day"),
+    /* c8 ignore next — Node 24 normalises "24" upstream; guarded for older Intl impls. */
     h === 24 ? 0 : h,
     get("minute"),
     get("second"),

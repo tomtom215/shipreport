@@ -155,6 +155,9 @@ export async function writeReport(
     written.push(p);
   }
 
+  /* c8 ignore start — pdf/png delegate to the c8-ignored chromium path
+     below; the gating itself is one boolean check per format and is
+     exercised end-to-end by the WITH_PDF=1 Docker smoke test. */
   if (formats.includes("pdf") && html) {
     const pdfPath = path.join(dir, `${basename}.pdf`);
     await renderPdf(html, pdfPath);
@@ -166,6 +169,7 @@ export async function writeReport(
     await renderPng(html, pngPath);
     written.push(pngPath);
   }
+  /* c8 ignore stop */
 
   return written;
 }
@@ -227,6 +231,9 @@ export async function readPackageVersion(): Promise<string> {
     const pkg = JSON.parse(raw) as { version?: string };
     return pkg.version ?? "0.0.0";
   } catch {
+    /* c8 ignore next — defensive fallback for installations where
+       package.json is unreadable (e.g. unbundled in unusual deploys);
+       intentionally never thrown by tests. */
     return "0.0.0";
   }
 }

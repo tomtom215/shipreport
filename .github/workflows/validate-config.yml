@@ -1,0 +1,62 @@
+name: validate-config
+
+# PR-time validation for the operator's `shipreport.yaml`. Runs WITHOUT
+# secrets — `shipreport doctor` is auth-aware and would fail fast in this
+# context, so we use a config-load-only path that:
+#   * parses the YAML against the Zod schema (catches typos, bad cron, etc.),
+#   * confirms every team has at least one repo and either members or
+#     autoMembers,
+#   * confirms `dryRun` works against the repo's checked-in cache (if any),
+#   * runs `actionlint` over every workflow under `.github/workflows/`.
+#
+# This is the workflow operators should keep enabled on PRs against their
+# fork. It deliberately needs zero permissions and zero secrets.
+
+on:
+  pull_request:
+    paths:
+      - "shipreport.yaml"
+      - ".github/workflows/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Detect operator config
+        id: detect
+        run: |
+          if [ -f shipreport.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No shipreport.yaml::Validation skipped — the upstream mirror has no config to validate."
+          fi
+
+      # config-only validation: parses the YAML and fails fast on any
+      # schema/cron error. No network, no token required.
+      - name: Validate shipreport.yaml schema
+        if: steps.detect.outputs.present == 'true'
+        run: node scripts/validate-config.mjs shipreport.yaml
+
+      - name: Lint all workflows (actionlint)
+        uses: raven-actions/actionlint@v2
+        with:
+          files: ".github/workflows/*.yml"

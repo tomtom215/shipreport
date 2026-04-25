@@ -23,6 +23,12 @@ github.com and GitHub Enterprise Server. Fine-grained PATs and GitHub App
 installation tokens both supported. No data leaves your network unless you
 choose to ship the audit log somewhere.
 
+**End-user docs**: see [`docs/`](./docs/) — a 16-page index covering
+prerequisites, all three auth flows (PAT / App / GHES), every supported
+deployment pattern, dry-run methodology, the audit-log model, and
+troubleshooting. Start at [`docs/02-quickstart.md`](./docs/02-quickstart.md)
+for a 10-minute go-live.
+
 ---
 
 ## Quick start
@@ -396,13 +402,27 @@ docker run --rm \
 Add `--build-arg WITH_PDF=1` to install Chromium + puppeteer for PDF output
 (~400 MB larger). Omit the flag to keep the image at ~150 MB.
 
-### Scheduled GitHub Action
+### Scheduled GitHub Action (recommended)
 
-[`.github/workflows/tick.yml`](./.github/workflows/tick.yml) is a template
-intended for operators who fork the repo into their own org. It runs
-`shipreport schedule tick` hourly and is a no-op when no `shipreport.yaml`
-sits at the repo root, so the upstream mirror's scheduled runs stay green
-without any operator config.
+GitHub Actions is the primary supported deployment. Three patterns ship
+ready-to-use:
+
+* **Fork-and-go**: [`.github/workflows/tick.yml`](./.github/workflows/tick.yml) —
+  hourly cron + manual dispatch with `run` / `dry-run` / `doctor` /
+  `preview` modes. No-op when there's no `shipreport.yaml` at the repo
+  root, so the upstream mirror stays green.
+* **Reusable workflow**:
+  [`.github/workflows/reusable-shipreport.yml`](./.github/workflows/reusable-shipreport.yml) —
+  callable from any repo. Five copy-paste callers in
+  [`examples/github-actions/`](./examples/github-actions/) cover PAT,
+  App, hourly tick, GHES self-hosted, and PR-time validation.
+* **Audit export**:
+  [`.github/workflows/audit-export.yml`](./.github/workflows/audit-export.yml) —
+  daily JSONL + signed snapshot of the audit chain, uploaded as an
+  artifact for SOC2 evidence.
+
+Full operator manual is in [`docs/`](./docs/) — start at
+[`docs/02-quickstart.md`](./docs/02-quickstart.md).
 
 ---
 

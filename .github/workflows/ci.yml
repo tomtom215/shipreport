@@ -66,3 +66,22 @@ jobs:
         with:
           globs: |
             examples/sample-output/**/*.md
+            docs/**/*.md
+
+  validate-examples:
+    # End-to-end check: run scripts/validate-config.mjs over every checked-in
+    # example YAML so a doc change that breaks the example reference fails
+    # CI rather than landing silently.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/validate-config.mjs examples/shipreport.yaml
+      - run: node scripts/validate-config.mjs examples/vllm.yaml

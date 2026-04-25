@@ -1,0 +1,42 @@
+# Example caller workflow — quarterly run, GitHub App auth.
+#
+# Copy this into YOUR repo at `.github/workflows/quarterly.yml`. Required:
+#   * `shipreport.yaml` at the repo root with a `github.app` block — see
+#     docs/04-auth-github-app.md for the exact shape.
+#   * Secrets:
+#       SHIPREPORT_APP_PRIVATE_KEY — App private key in PEM form.
+#                                    \n-escaped is OK; literal newlines also OK.
+#       SHIPREPORT_AUDIT_KEY        — optional ed25519 PEM for audit snapshots.
+#
+# App auth is recommended for enterprise: installation tokens are scoped to
+# specific repos, expire hourly (auto-renewed at 50 min), and can't escape
+# the org's permission policy. See docs/04-auth-github-app.md.
+
+name: shipreport-quarterly
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | doctor"
+        required: false
+        default: "run"
+      team:
+        description: "Team name; empty for --all"
+        required: false
+  schedule:
+    - cron: "0 14 1 1,4,7,10 *"
+
+permissions:
+  contents: read
+
+jobs:
+  shipreport:
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+    with:
+      config: shipreport.yaml
+      mode: ${{ inputs.mode || 'run' }}
+      team: ${{ inputs.team || '' }}
+    secrets:
+      shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}
+      shipreport_audit_key: ${{ secrets.SHIPREPORT_AUDIT_KEY }}

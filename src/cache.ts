@@ -138,6 +138,8 @@ export class Cache {
     const c = this.db
       .prepare("DELETE FROM extract_checkpoints WHERE updated_at < ?")
       .run(cutoff);
+    /* c8 ignore next — `?? 0` defends against drivers that return
+       undefined for `changes`; node:sqlite always reports a number. */
     return Number(a.changes ?? 0) + Number(b.changes ?? 0) + Number(c.changes ?? 0);
   }
 

@@ -1,0 +1,33 @@
+# Example caller workflow — quarterly run, PAT auth.
+#
+# Copy this into YOUR repo at `.github/workflows/quarterly.yml`. Provide:
+#   * `shipreport.yaml` at the repo root with at least one team.
+#   * Secret `SHIPREPORT_TOKEN` set to a fine-grained PAT (see
+#     docs/03-auth-pat.md for the exact scopes).
+#
+# This is the simplest possible deployment: one team, one repo, quarterly
+# on the 1st of Jan/Apr/Jul/Oct at 14:00 UTC, plus a manual dispatch button.
+
+name: shipreport-quarterly
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run | dry-run | doctor"
+        required: false
+        default: "run"
+  schedule:
+    - cron: "0 14 1 1,4,7,10 *"
+
+permissions:
+  contents: read
+
+jobs:
+  shipreport:
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+    with:
+      config: shipreport.yaml
+      mode: ${{ inputs.mode || 'run' }}
+    secrets:
+      shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
