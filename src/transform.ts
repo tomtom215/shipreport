@@ -201,11 +201,10 @@ export function aggregateDev(
   };
 }
 
-/** Keep totals presentable: integers where exact, one decimal when fractional. */
+/** Keep totals presentable: clamp negatives to 0, otherwise round to 1 decimal. */
 function roundCredit(n: number): number {
   if (n < 0) return 0;
-  const rounded = Math.round(n * 10) / 10;
-  return Number.isInteger(rounded) ? rounded : rounded;
+  return Math.round(n * 10) / 10;
 }
 
 function roundKinds(k: Record<PRKind, number>): Record<PRKind, number> {

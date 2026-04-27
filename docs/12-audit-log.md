@@ -60,6 +60,17 @@ Every `run_completed` row carries a `counters` payload:
 }
 ```
 
+Counter semantics:
+
+- `apiCalls` is the count of work-bearing GraphQL requests issued
+  through the shipreport client. The trailing rate-limit probe and any
+  uncounted internal queries are excluded so the value reflects the
+  extract work itself. A request that fails after the network call has
+  been issued still counts (the budget was consumed); pre-flight
+  failures (e.g. token resolution) do not.
+- `cacheHits` is the exact count of merged-result PRs whose
+  `(repo, number)` was NOT freshly fetched this run.
+
 ## Hash chain
 
 Each row's `hash` is computed as:

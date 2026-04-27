@@ -48,11 +48,19 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
 
   // --dry-run never touches the network, so it never needs a resolved token.
   // Otherwise, build a TokenSource that can renew mid-run for App auth.
+  // The `onRenew` hook below captures every successful re-mint as a
+  // SOC2 evidence row — without it the chain has no record of the
+  // long-running App auth refreshes that the docs promise it does.
+  // The closure intentionally captures `identity` lazily because the
+  // identity string is finalised on the next line.
+  let identity = "dry-run:local";
   const tokenSource = opts.dryRun
     ? null
-    : await tokenSourceFromConfig(cfg);
-  const identity = tokenSource?.identity ?? "dry-run:local";
+    : await tokenSourceFromConfig(cfg, {
+        onRenew: makeRenewAuditor(() => identity, cfg.org, opts.audit),
+      });
   if (tokenSource) {
+    identity = tokenSource.identity;
     opts.audit?.append({
       actor: identity,
       event: "token_resolved",
@@ -132,6 +140,14 @@ export async function runTeam(opts: RunOptions): Promise<RunResult> {
       cache: extractCache,
       rateLimitGuard,
       log,
+      onCheckpoint: (info) => {
+        opts.audit?.append({
+          actor: identity,
+          event: "extract_checkpointed",
+          target: `${cfg.org}/${team.name}`,
+          payload: info,
+        });
+      },
     },
   );
   if (droppedNonDefaultBranch > 0) {
@@ -270,4 +286,34 @@ export function scheduleStoreFor(state: StateDB): ScheduleStore {
 
 export function auditLogFor(state: StateDB): AuditLog {
   return new AuditLog(state);
+}
+
+/**
+ * Build the `onRenew` callback for the App TokenSource. Factored out of
+ * runTeam so its body — the actual audit-row shape and the lazy identity
+ * read — is unit-testable without spinning up a real long-running
+ * extract that crosses the renewal threshold. Returns undefined when no
+ * audit log is present so we don't pay for a closure that does nothing.
+ */
+export function makeRenewAuditor(
+  getIdentity: () => string,
+  org: string,
+  audit: AuditLog | undefined,
+):
+  | ((info: { renewalCount: number; mintedAtMs: number; previousMintedAtMs: number }) => void)
+  | undefined {
+  if (!audit) return undefined;
+  return ({ renewalCount, mintedAtMs, previousMintedAtMs }) => {
+    audit.append({
+      actor: getIdentity(),
+      event: "token_renewed",
+      target: org,
+      payload: {
+        renewalCount,
+        mintedAtMs,
+        previousMintedAtMs,
+        ageMs: mintedAtMs - previousMintedAtMs,
+      },
+    });
+  };
 }

@@ -98,9 +98,16 @@ export function cronMatches(spec: CronSpec, at: Date): boolean {
  *   (a) it has a schedule, AND
  *   (b) there is a minute between lastRun and now that matches the cron.
  *
- * For minute-resolution granularity this is an O(minutes-since-last-run) scan,
- * which is fine up to a year. For a quarterly schedule that usually means
- * scanning ~90 days * 1440 minutes — still milliseconds.
+ * Cost model. The scan is O(minutes-since-last-run), capped at
+ * `maxScanMinutes` (default 365 days = 525,600 iterations). Each
+ * iteration is a `Date` allocation plus four `includes` lookups; on
+ * Node 24 that's ~10-12 ns per loop, so the absolute worst case (a
+ * year-stale `lastRunAt` running on a tiny ARM box) lands in the
+ * 5-10 ms range. Realistic shapes — quarterly cron with hourly tick,
+ * recently-run teams — finish in microseconds. The cap exists so a
+ * pathologically stale state DB can't pin a CI runner for hours; it
+ * is NOT a recovery boundary, since `cronMatches` is itself stateless
+ * and re-checks fire normally on subsequent ticks.
  */
 export function isDueSince(
   spec: CronSpec,

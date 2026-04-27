@@ -63,9 +63,13 @@ real risk. Mitigations:
   embedded in a PR body is escaped, not rendered.
 * **HTML output** uses an HTML escaper for the title only; the body is
   the markdown-it output (which already escapes raw HTML).
-* **PDF / PNG** rendering uses puppeteer with `--no-sandbox
-  --disable-setuid-sandbox` (typical Chromium-in-container flags). Don't
-  point puppeteer at untrusted external HTML.
+* **PDF / PNG** rendering uses puppeteer. The Chromium sandbox is
+  **left enabled by default** on bare-metal hosts; shipreport drops
+  `--no-sandbox --disable-setuid-sandbox` only when the renderer
+  detects `/.dockerenv` (running inside a container) or the operator
+  has set `SHIPREPORT_NO_SANDBOX=1` (explicit opt-in for environments
+  where the sandbox is incompatible with the runtime). Don't point
+  puppeteer at untrusted external HTML.
 
 The full path: `RawPR (string) → markdown-it (no HTML) → HTML →
 Chromium (sandboxed) → PDF/PNG`. The only place untrusted text reaches

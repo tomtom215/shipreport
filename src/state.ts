@@ -1,12 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
-
-const req = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { DatabaseSync } = req("node:sqlite") as { DatabaseSync: any };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DatabaseSync = any;
+import { DatabaseSync } from "node:sqlite";
 
 /**
  * A small shared SQLite DB for non-cache state:
@@ -15,6 +9,12 @@ type DatabaseSync = any;
  *
  * Deliberately separate from the HTTP cache DB so `cache prune` can't touch
  * audit rows, and so a corrupted cache doesn't threaten compliance evidence.
+ *
+ * Journal mode is WAL: a long extract holding a write lock no longer
+ * blocks `audit verify` or `audit export` readers. WAL files (-wal /
+ * -shm) live alongside the main DB file; the property test in
+ * `tests/audit-property.test.ts` issues `wal_checkpoint(TRUNCATE)` to
+ * fold them back into the main file before tampering on disk.
  */
 export class StateDB {
   readonly db: DatabaseSync;
@@ -26,6 +26,7 @@ export class StateDB {
   static async open(dbPath: string): Promise<StateDB> {
     await mkdir(path.dirname(dbPath), { recursive: true });
     const db = new DatabaseSync(dbPath);
+    db.exec(`PRAGMA journal_mode=WAL;`);
     db.exec(`
       CREATE TABLE IF NOT EXISTS audit_log (
         seq         INTEGER PRIMARY KEY AUTOINCREMENT,

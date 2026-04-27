@@ -1,9 +1,13 @@
 # shipreport — Quarterly engineering success story generator.
-# Slim image, no native deps (Node 24 ships stable SQLite). ~150 MB.
+# Slim image, no native deps. Uses the `node:sqlite` built-in (unflagged
+# since Node 22.13 / 23.4; still tagged ExperimentalWarning by Node — see
+# bin/shipreport.js for the targeted suppression at the binary boundary).
+# ~150 MB.
 #
 # Pinning policy:
-#   * Base image is `node:24-alpine` (matches package.json's
-#     `engines.node: ">=24.0.0"` and CI's `node-version: 24`).
+#   * Base image is `node:24-alpine`. shipreport's `engines.node` floor
+#     is `>=22.13.0` (where `node:sqlite` was unflagged); the image
+#     intentionally tracks the most recent LTS-track Node that CI exercises.
 #   * The digest below is the multi-arch manifest list for `node:24-alpine`
 #     as of 2026-04-16. Resolve a fresh digest yourself before cutting a
 #     release with:

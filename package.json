@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "tsc && node scripts/copy-templates.js",
-    "dev": "tsx src/cli.ts",
+    "dev": "tsx src/cli-main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

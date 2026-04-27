@@ -56,6 +56,17 @@ export interface AppTokenSourceOptions {
   nowMs?: () => number;
   /** Threshold after which a token is re-minted. */
   renewAfterMs?: number;
+  /**
+   * Called once per successful re-mint (NOT for the first mint). Used by
+   * run.ts to emit the SOC2 `token_renewed` audit row. The callback is
+   * fire-and-forget — it must not throw or return a promise the source
+   * waits on, since the renew path is on the request hot path.
+   */
+  onRenew?: (info: {
+    renewalCount: number;
+    mintedAtMs: number;
+    previousMintedAtMs: number;
+  }) => void;
 }
 
 /**
@@ -90,8 +101,17 @@ export function createAppTokenSource(opts: AppTokenSourceOptions): TokenSource {
         return await mint();
       }
       if (nowMs() - cached.mintedAtMs >= renewAfterMs) {
+        const previousMintedAtMs = cached.mintedAtMs;
         renewals += 1;
-        return await mint();
+        const token = await mint();
+        if (opts.onRenew && cached) {
+          opts.onRenew({
+            renewalCount: renewals,
+            mintedAtMs: cached.mintedAtMs,
+            previousMintedAtMs,
+          });
+        }
+        return token;
       }
       return cached.token;
     },
@@ -106,7 +126,11 @@ export function createAppTokenSource(opts: AppTokenSourceOptions): TokenSource {
  */
 export async function tokenSourceFromConfig(
   cfg: Config,
-  opts: { nowMs?: () => number; renewAfterMs?: number } = {},
+  opts: {
+    nowMs?: () => number;
+    renewAfterMs?: number;
+    onRenew?: AppTokenSourceOptions["onRenew"];
+  } = {},
 ): Promise<TokenSource> {
   if (cfg.github.app) {
     const app = cfg.github.app;
@@ -119,6 +143,7 @@ export async function tokenSourceFromConfig(
       installationId,
       nowMs: opts.nowMs,
       renewAfterMs: opts.renewAfterMs,
+      onRenew: opts.onRenew,
     });
   }
   return createPatTokenSource(cfg.github.tokenEnv);

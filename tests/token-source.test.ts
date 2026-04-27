@@ -118,6 +118,46 @@ describe("App token source — clock-mocked renewal", () => {
     const token = await src.getToken();
     expect(src.identity).not.toContain(token);
   });
+
+  it("invokes onRenew exactly once per re-mint, with monotonic counters and timing", async () => {
+    const calls: Array<{
+      renewalCount: number;
+      mintedAtMs: number;
+      previousMintedAtMs: number;
+    }> = [];
+    const src = createAppTokenSource({
+      appId: 1,
+      privateKeyPem,
+      installationId: 2,
+      nowMs,
+      renewAfterMs: 1000,
+      onRenew: (info) => calls.push(info),
+    });
+    // First mint: NOT a renewal — onRenew must not fire.
+    await src.getToken();
+    expect(calls).toEqual([]);
+
+    // Below threshold: token reused, no renewal.
+    now += 999;
+    await src.getToken();
+    expect(calls).toEqual([]);
+
+    // First renewal at threshold.
+    now += 1;
+    await src.getToken();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.renewalCount).toBe(1);
+    expect(calls[0]!.mintedAtMs).toBe(now);
+    expect(calls[0]!.previousMintedAtMs).toBeLessThan(calls[0]!.mintedAtMs);
+
+    // Second renewal — counter increments, previous-minted reflects last mint.
+    const previousMinted = calls[0]!.mintedAtMs;
+    now += 1500;
+    await src.getToken();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.renewalCount).toBe(2);
+    expect(calls[1]!.previousMintedAtMs).toBe(previousMinted);
+  });
 });
 
 describe("tokenSourceFromConfig", () => {

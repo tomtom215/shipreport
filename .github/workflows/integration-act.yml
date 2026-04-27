@@ -59,6 +59,15 @@ jobs:
           ./act --version
 
       - name: "Smoke-test validate-config workflow (no secrets)"
+        env:
+          # The `runs-on: ubuntu-latest` resolution. We use
+          # `node:24-bookworm-slim` instead of `node:24-alpine` because
+          # Alpine does not ship `bash`, and several `run:` steps
+          # (composite actions like setup-node, our own retry shells,
+          # actionlint install) expect `bash -e`. Bookworm-slim has bash,
+          # glibc, and is ~200 MB — far closer to a real ubuntu-latest
+          # runner without paying the full catthehacker image cost.
+          ACT_RUNNER_IMAGE: "node:24-bookworm-slim"
         run: |
           # `act -W` runs a single workflow file. Use `--list` first as a
           # cheap parse-only step before paying for runner image pulls.
@@ -70,9 +79,11 @@ jobs:
           ./act pull_request -W .github/workflows/validate-config.yml \
             --pull=false \
             --rm \
-            -P ubuntu-latest=node:24-alpine
+            -P "ubuntu-latest=${ACT_RUNNER_IMAGE}"
 
       - name: "Smoke-test tick workflow (mode=doctor, no real auth)"
+        env:
+          ACT_RUNNER_IMAGE: "node:24-bookworm-slim"
         run: |
           # Dispatch the tick workflow with mode=doctor + offline preflight.
           # We do NOT supply a real PAT — the doctor preflight in dry-run /
@@ -90,7 +101,7 @@ jobs:
             --rm \
             --secret-file .act-secrets/secrets \
             --input mode=doctor \
-            -P ubuntu-latest=node:24-alpine || {
+            -P "ubuntu-latest=${ACT_RUNNER_IMAGE}" || {
               echo "::warning title=tick smoke failed::Investigate before merging changes that touch tick.yml."
               # Don't hard-fail the workflow if the act runner can't fully
               # boot the sandbox — log a warning so we get signal but
