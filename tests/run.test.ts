@@ -6,7 +6,13 @@ import { AuditLog } from "../src/audit.js";
 import { Cache } from "../src/cache.js";
 import { normalize } from "../src/config.js";
 import { ExtractCache } from "../src/extract-cache.js";
-import { auditLogFor, openState, runTeam, scheduleStoreFor } from "../src/run.js";
+import {
+  auditLogFor,
+  makeRenewAuditor,
+  openState,
+  runTeam,
+  scheduleStoreFor,
+} from "../src/run.js";
 import { StateDB } from "../src/state.js";
 import { quarterLabelToRange } from "../src/tz.js";
 import type { RawPR } from "../src/types.js";
@@ -418,6 +424,48 @@ describe("run.ts helper exports", () => {
     try {
       expect(scheduleStoreFor(state)).toBeDefined();
       expect(auditLogFor(state)).toBeInstanceOf(AuditLog);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("makeRenewAuditor returns undefined when no audit log is present", () => {
+    expect(makeRenewAuditor(() => "id", "org", undefined)).toBeUndefined();
+  });
+
+  it("makeRenewAuditor emits a token_renewed row with the lazy identity + correct payload", async () => {
+    const state = await StateDB.open(path.join(dir, "state-renew.sqlite"));
+    try {
+      const audit = new AuditLog(state);
+      let identity = "dry-run:local";
+      const cb = makeRenewAuditor(() => identity, "acme-eng", audit)!;
+      expect(cb).toBeDefined();
+      // Emulate run.ts: identity flips from the placeholder to the real one
+      // BEFORE the App source ever calls onRenew. The closure must read it
+      // lazily.
+      identity = "app:42:install:7";
+      cb({ renewalCount: 1, mintedAtMs: 2_000, previousMintedAtMs: 1_000 });
+      cb({ renewalCount: 2, mintedAtMs: 5_000, previousMintedAtMs: 2_500 });
+
+      const rows = audit.tail(10);
+      expect(rows).toHaveLength(2);
+      // tail() returns newest-first; reverse to chronological order.
+      const [first, second] = [rows[1]!, rows[0]!];
+      expect(first.event).toBe("token_renewed");
+      expect(first.actor).toBe("app:42:install:7");
+      expect(first.target).toBe("acme-eng");
+      expect(first.payload).toEqual({
+        renewalCount: 1,
+        mintedAtMs: 2_000,
+        previousMintedAtMs: 1_000,
+        ageMs: 1_000,
+      });
+      expect(second.payload).toEqual({
+        renewalCount: 2,
+        mintedAtMs: 5_000,
+        previousMintedAtMs: 2_500,
+        ageMs: 2_500,
+      });
     } finally {
       state.close();
     }

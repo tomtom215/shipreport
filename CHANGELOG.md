@@ -8,6 +8,71 @@ All notable changes are recorded here. Format: [Keep a Changelog
 
 ### Added
 
+- `src/version.ts` is the single source of truth for the running version
+  + outbound User-Agent. `tests/version.test.ts` now fails the build if
+  the citty CLI meta or the Octokit UA drift away from `package.json`.
+- `token_renewed` and `extract_checkpointed` audit rows are actually
+  emitted (the enum-only declarations + doc claims they were already
+  written are now backed by real call sites in `run.ts`):
+  - `runTeam` passes an `onRenew` callback into `tokenSourceFromConfig`
+    that appends a `token_renewed` row whenever the App installation
+    token is re-minted at the 50-minute boundary.
+  - `extractAll` now invokes an `onCheckpoint` callback at every
+    page-boundary checkpoint write, which `run.ts` translates into an
+    `extract_checkpointed` audit row.
+- `tests/audit-events.test.ts` grep-walks `src/` to assert every
+  declared `AuditEvent` has at least one production call site.
+- `tests/version.test.ts`, `tests/cache.test.ts`, `tests/audit.test.ts`
+  unit-cover the new row validators that replaced the old `as any`
+  shims.
+- `SHIPREPORT_NO_SANDBOX=1` opt-in for puppeteer's `--no-sandbox`
+  flag. Chromium's sandbox is now left enabled by default on bare
+  metal; the flag is dropped automatically inside Docker (via
+  `/.dockerenv` detection) or when an operator sets the env var.
+
+### Changed
+
+- `src/cli.ts` no longer hard-codes `version: "0.2.0"` and `src/github.ts`
+  no longer hard-codes `userAgent: "shipreport/0.2"` — both pull from
+  `src/version.ts`.
+- `apiCalls` counter no longer counts probe queries or pre-flight
+  token-resolution failures; the run-completed audit payload reflects
+  extract work only. `cacheHits` is now exact (count of merged-result
+  PRs whose `(repo, number)` was not freshly fetched), no longer a
+  length-difference heuristic.
+- `node:sqlite` is imported through the typed `@types/node` declaration
+  rather than `createRequire(...) as any`. Both `Cache` and `StateDB`
+  now run validators on every read (typed throw paths covered by tests).
+- `src/audit.ts` `append()` reads `seq` from `lastInsertRowid` instead
+  of issuing a follow-up `SELECT seq WHERE hash = ?` round-trip.
+- Both SQLite databases (cache + state) open with `PRAGMA journal_mode=
+  WAL` so an in-progress extract doesn't block concurrent `audit verify`
+  / `audit export` readers.
+- `runConcurrent` short-circuits new dispatch once any task has thrown,
+  bounding wasted work (e.g. cascading 401s) at `limit-1` rather than
+  the full N — in-flight tasks still settle so partial audit rows write.
+- `bin/shipreport.js` silences only the `node:sqlite`
+  `ExperimentalWarning` at the binary boundary; tests still see all
+  warnings.
+- `pnpm dev` now runs `tsx src/cli-main.ts` (was `tsx src/cli.ts`,
+  which became a no-op when the citty `runMain` moved out of cli.ts).
+
+### Fixed
+
+- Dead `Number.isInteger(rounded) ? rounded : rounded` ternary in
+  `src/transform.ts roundCredit`.
+- `src/render.ts firstParagraph` comment no longer claims to strip
+  trailing issue-link refs (it never did; only leading `#` and `>`).
+- `docker/Dockerfile` no longer claims to match `engines.node: ">=24"`
+  (real floor is `>=22.13.0`) or that Node 24 ships "stable" SQLite
+  (it's still tagged `ExperimentalWarning` — the binary now suppresses
+  the noise instead).
+- `cli.ts` `audit tail / verify / export / snapshot` use a shared
+  `requireState` helper instead of repeating the four-line
+  `audit.enabled: false → exit 2` block.
+
+## [Pre-Unreleased]
+
 - GitHub Actions as primary deployment surface:
   - `tick.yml` with `run` / `dry-run` / `doctor` / `preview` modes,
     branch-scoped state cache, audit-DB artifact, post-run audit verify.

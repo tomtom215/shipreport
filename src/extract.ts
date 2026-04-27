@@ -22,6 +22,18 @@ export interface ExtractOptions {
   /** Rate-limit guard shared with the github client. */
   rateLimitGuard?: RateLimitGuard;
   log?: (msg: string) => void;
+  /**
+   * Called once per page-boundary checkpoint write. Wired by run.ts to
+   * emit the SOC2 `extract_checkpointed` audit row so resumed extracts
+   * are an evidence-grade event, not just a side effect of the cache.
+   */
+  onCheckpoint?: (info: {
+    repo: string;
+    quarterLabel: string;
+    pages: number;
+    partialCount: number;
+    cursor: string | null;
+  }) => void;
 }
 
 export interface ExtractResult {
@@ -256,6 +268,13 @@ async function fetchRepo(
       pages,
       partialPrs: freshPRs,
     });
+    opts.onCheckpoint?.({
+      repo: repoPath,
+      quarterLabel: quarter.label,
+      pages,
+      partialCount: freshPRs.length,
+      cursor,
+    });
 
     if (caughtUp) break;
     if (!pageInfo.hasNextPage) break;
@@ -280,7 +299,19 @@ async function fetchRepo(
   // finished extract on the next run.
   opts.cache?.clearCheckpoint(repoPath, quarter);
 
-  const cacheHits = Math.max(0, merged.length - freshPRs.length);
+  // Exact cache-hit count: every PR in the final merged set whose
+  // (repo, number) was NOT freshly fetched this run was served from
+  // the prior snapshot. mergeByNumber lets a fresh fetch override a
+  // cached entry, so this is the count of cache rows that survived
+  // the round without an API call. This counter is shipped into the
+  // run_completed audit payload as evidence-grade work-saved data;
+  // the previous (length-difference) heuristic could undercount when
+  // fresh fetches were updates of cached PRs rather than new ones.
+  const freshKeys = new Set(freshPRs.map((p) => `${p.repo}#${p.number}`));
+  const cacheHits = merged.reduce(
+    (n, p) => (freshKeys.has(`${p.repo}#${p.number}`) ? n : n + 1),
+    0,
+  );
   if (opts.counters) opts.counters.cacheHits += cacheHits;
 
   return { prs: merged, droppedNonDefault, cacheHits };

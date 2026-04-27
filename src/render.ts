@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,15 +6,26 @@ import { Eta } from "eta";
 import MarkdownIt from "markdown-it";
 import { narrate } from "./narrate.js";
 import type { DevQuarter, TeamQuarter } from "./types.js";
+import { VERSION } from "./version.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function resolveTemplateDir(): string {
-  const candidates = [
+/**
+ * Pick the first existing directory from the candidate list, or fall
+ * back to the first one (so Eta produces a clear "template not found"
+ * error rather than a generic ENOENT). Exported for tests so the
+ * fallback branch is exercised without monkey-patching `fs`.
+ */
+export function resolveTemplateDir(
+  candidates: ReadonlyArray<string> = [
     path.join(__dirname, "templates"),
     path.join(__dirname, "..", "src", "templates"),
-  ];
+  ],
+): string {
   for (const c of candidates) if (existsSync(c)) return c;
+  if (candidates.length === 0) {
+    throw new Error("resolveTemplateDir: no candidates supplied");
+  }
   return candidates[0]!;
 }
 
@@ -42,12 +53,11 @@ const fmt = {
     const trimmed = body.trim();
     if (!trimmed) return "";
     const first = trimmed.split(/\n\s*\n/)[0]!.trim();
-    // Strip markdown headings, trailing refs like "Fixes #123".
+    // Strip a leading markdown heading marker and any per-line block-quote
+    // markers from the first paragraph so the "Why it mattered" excerpt
+    // reads as prose. Issue-link trailers like "Fixes #123" are usually
+    // in their own paragraph and never reach here.
     return first.replace(/^#+\s*/, "").replace(/^\s*>\s?/gm, "");
-  },
-  pct(n: number, total: number): string {
-    if (!total) return "0%";
-    return `${Math.round((n / total) * 100)}%`;
   },
 };
 
@@ -189,10 +199,18 @@ async function launchChromium(): Promise<{
       "PDF/PNG output requires the optional `puppeteer` dependency. Install with `pnpm add puppeteer`.",
     );
   }
-  const browser = await puppeteer!.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  // Chromium's sandbox is the primary defence-in-depth around the
+  // renderer process. Drop it ONLY when we have to: inside a container
+  // running as a non-root user without CAP_SYS_ADMIN (the Dockerfile's
+  // runtime), or when an operator opts in explicitly. The opt-in env
+  // var is documented in docs/14-security.md.
+  const inDocker = existsSync("/.dockerenv");
+  const optedIn = process.env.SHIPREPORT_NO_SANDBOX === "1";
+  const args: string[] = [];
+  if (inDocker || optedIn) {
+    args.push("--no-sandbox", "--disable-setuid-sandbox");
+  }
+  const browser = await puppeteer!.launch({ headless: true, args });
   return { browser, close: () => browser.close() };
 }
 
@@ -224,16 +242,12 @@ async function renderPng(html: string, outPath: string): Promise<void> {
 }
 /* c8 ignore stop */
 
+/**
+ * Resolve the running shipreport version. Sourced from src/version.ts so
+ * that the CLI meta, the GitHub User-Agent, and the report footer all
+ * stamp the same string. Async wrapper retained for backwards-compat
+ * with run.ts; see src/version.ts for the single point of truth.
+ */
 export async function readPackageVersion(): Promise<string> {
-  try {
-    const pkgPath = path.join(__dirname, "..", "package.json");
-    const raw = await readFile(pkgPath, "utf8");
-    const pkg = JSON.parse(raw) as { version?: string };
-    return pkg.version ?? "0.0.0";
-  } catch {
-    /* c8 ignore next — defensive fallback for installations where
-       package.json is unreadable (e.g. unbundled in unusual deploys);
-       intentionally never thrown by tests. */
-    return "0.0.0";
-  }
+  return VERSION;
 }

@@ -19,6 +19,7 @@ import { makeClient, probeToken } from "../src/github.js";
 import { createCounters } from "../src/counters.js";
 import { RateLimitGuard } from "../src/rate-limit.js";
 import type { TokenSource } from "../src/token-source.js";
+import { USER_AGENT, VERSION } from "../src/version.js";
 
 const API = "https://api.github.com";
 const GHES_API = "https://ghe.example.com/api/v3";
@@ -212,6 +213,32 @@ describe("makeClient.graphql", () => {
       graphqlUrl: `${API}/graphql`,
     });
     expect(await client.probeRemaining()).toBeNull();
+  });
+});
+
+describe("makeClient User-Agent", () => {
+  it("uses the package.json-derived USER_AGENT for outbound GraphQL by default", async () => {
+    let seenUA: string | string[] | undefined;
+    nock(GRAPHQL)
+      .post("/graphql")
+      .reply(function () {
+        const h = this.req.headers as Record<string, string | string[]>;
+        seenUA = h["user-agent"] ?? h["User-Agent"];
+        return [200, { data: { rateLimit: { remaining: 1 } } }];
+      });
+    const client = makeClient({
+      tokenSource: patSource("X", "tok"),
+      baseUrl: API,
+      graphqlUrl: `${API}/graphql`,
+    });
+    await client.graphql(`query { rateLimit { remaining } }`);
+    const ua = Array.isArray(seenUA) ? seenUA[0] : seenUA;
+    // Strict: the wire UA must START with the version-derived prefix.
+    // Octokit appends `octokit-graphql.js/<v> Node.js/<v>` after, so we
+    // assert prefix rather than exact equality.
+    expect(ua ?? "").toMatch(new RegExp(`^shipreport/${VERSION.replace(/\./g, "\\.")}\\b`));
+    // Also assert the constant itself is exactly the documented shape.
+    expect(USER_AGENT).toBe(`shipreport/${VERSION}`);
   });
 });
 

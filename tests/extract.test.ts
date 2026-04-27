@@ -357,6 +357,74 @@ describe("extractAll — checkpoint resume", () => {
     // After a successful extract, the checkpoint is cleared.
     expect(ec.loadCheckpoint("o/r", q)).toBeNull();
   });
+
+  it("invokes onCheckpoint exactly once per page-boundary write", async () => {
+    const q = quarterLabelToRange("2026Q1", "UTC");
+    const ec = new ExtractCache(cache);
+    const seen: Array<{
+      repo: string;
+      quarterLabel: string;
+      pages: number;
+      partialCount: number;
+      cursor: string | null;
+    }> = [];
+
+    // Two-page success. Both page boundaries should fire onCheckpoint;
+    // the SOC2 audit row in run.ts is keyed off this callback.
+    let call = 0;
+    const pages = [
+      {
+        cursor: "after-1",
+        hasNext: true,
+        nodes: [{ number: 1, baseRefName: "main", mergedAt: "2026-02-20T00:00:00Z", updatedAt: "2026-02-20T00:00:00Z" }],
+      },
+      {
+        cursor: "after-2",
+        hasNext: false,
+        nodes: [{ number: 2, baseRefName: "main", mergedAt: "2026-02-15T00:00:00Z", updatedAt: "2026-02-15T00:00:00Z" }],
+      },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client: any = {
+      rest: {},
+      baseUrl: "",
+      async probeRemaining() {
+        return null;
+      },
+      async graphql() {
+        const p = pages[call++]!;
+        return {
+          repository: {
+            defaultBranchRef: { name: "main" },
+            pullRequests: {
+              pageInfo: { hasNextPage: p.hasNext, endCursor: p.cursor },
+              nodes: p.nodes.map((n) => toNode(n)),
+            },
+          },
+        };
+      },
+    };
+
+    await extractAll(client, { repos: ["o/r"] }, q, {
+      cache: ec,
+      onCheckpoint: (info) => seen.push(info),
+    });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatchObject({
+      repo: "o/r",
+      quarterLabel: "2026Q1",
+      pages: 1,
+      partialCount: 1,
+      cursor: "after-1",
+    });
+    expect(seen[1]).toMatchObject({
+      repo: "o/r",
+      pages: 2,
+      partialCount: 2,
+      cursor: "after-2",
+    });
+  });
 });
 
 // Helper used by checkpoint-resume test: wraps a stub node into the full

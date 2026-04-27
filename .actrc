@@ -1,0 +1,14 @@
+# Default config consumed by `act` when run from this repo's root.
+#
+# `runs-on: ubuntu-latest` on real GitHub maps to a glibc Ubuntu runner
+# with `bash`, `apt`, and the standard tool cache. The default `act`
+# images either skip bash (alpine) or weigh hundreds of MB
+# (catthehacker). `node:24-bookworm-slim` is the smallest middle
+# ground — it has bash, glibc, and Node 24 already cached, which
+# matches our `engines.node` floor and preserves the fidelity that
+# `tests/e2e/workflows.test.ts` and the `integration-act` job rely on.
+-P ubuntu-latest=node:24-bookworm-slim
+
+# Don't unconditionally pull on every invocation; leave it to the
+# operator. Repeats `--pull=false` from integration-act.yml.
+--pull=false

@@ -1,15 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
-
-// Stable Node 24 built-in — no native deps. Loaded via createRequire so
-// bundlers (Vite/vitest) don't try to resolve "node:sqlite" at transform
-// time.
-const req = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { DatabaseSync } = req("node:sqlite") as { DatabaseSync: any };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DatabaseSync = any;
+import { DatabaseSync } from "node:sqlite";
 
 export interface CacheEntry {
   etag: string | null;
@@ -30,6 +21,10 @@ export class Cache {
   constructor(dbPath: string, ttlDays: number) {
     this.ttlMs = ttlDays * 24 * 60 * 60 * 1000;
     this.db = new DatabaseSync(dbPath);
+    // WAL: keep readers (e.g. concurrent `audit export` or schedule
+    // tick reading the schedule_state side via the audit DB) unblocked
+    // by the writer that's currently saving an extract snapshot.
+    this.db.exec(`PRAGMA journal_mode=WAL;`);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS http_cache (
         key TEXT PRIMARY KEY,
@@ -67,9 +62,14 @@ export class Cache {
   get(key: string): CacheEntry | null {
     const row = this.db
       .prepare("SELECT etag, body, fetched_at FROM http_cache WHERE key = ?")
-      .get(key) as { etag: string | null; body: string; fetched_at: number } | undefined;
+      .get(key);
     if (!row) return null;
-    return { etag: row.etag, body: row.body, fetchedAt: row.fetched_at };
+    const r = row as Record<string, unknown>;
+    return {
+      etag: r["etag"] === null ? null : expectStr(r, "etag"),
+      body: expectStr(r, "body"),
+      fetchedAt: expectNum(r, "fetched_at"),
+    };
   }
 
   set(key: string, etag: string | null, body: string): void {
@@ -84,9 +84,10 @@ export class Cache {
   getExtractSnapshot(key: string): ExtractSnapshotRow | null {
     const row = this.db
       .prepare("SELECT body, fetched_at FROM extract_snapshots WHERE key = ?")
-      .get(key) as { body: string; fetched_at: number } | undefined;
+      .get(key);
     if (!row) return null;
-    return { body: row.body, fetchedAt: row.fetched_at };
+    const r = row as Record<string, unknown>;
+    return { body: expectStr(r, "body"), fetchedAt: expectNum(r, "fetched_at") };
   }
 
   setExtractSnapshot(key: string, body: string): void {
@@ -103,11 +104,14 @@ export class Cache {
   ): { cursor: string | null; partialBody: string; updatedAt: number } | null {
     const row = this.db
       .prepare("SELECT cursor, partial_body, updated_at FROM extract_checkpoints WHERE key = ?")
-      .get(key) as
-      | { cursor: string | null; partial_body: string; updated_at: number }
-      | undefined;
+      .get(key);
     if (!row) return null;
-    return { cursor: row.cursor, partialBody: row.partial_body, updatedAt: row.updated_at };
+    const r = row as Record<string, unknown>;
+    return {
+      cursor: r["cursor"] === null ? null : expectStr(r, "cursor"),
+      partialBody: expectStr(r, "partial_body"),
+      updatedAt: expectNum(r, "updated_at"),
+    };
   }
 
   setCheckpoint(key: string, cursor: string | null, partialBody: string): void {
@@ -138,12 +142,34 @@ export class Cache {
     const c = this.db
       .prepare("DELETE FROM extract_checkpoints WHERE updated_at < ?")
       .run(cutoff);
-    /* c8 ignore next — `?? 0` defends against drivers that return
-       undefined for `changes`; node:sqlite always reports a number. */
-    return Number(a.changes ?? 0) + Number(b.changes ?? 0) + Number(c.changes ?? 0);
+    return Number(a.changes) + Number(b.changes) + Number(c.changes);
   }
 
   close(): void {
     this.db.close();
   }
 }
+
+function expectStr(r: Record<string, unknown>, key: string): string {
+  const v = r[key];
+  if (typeof v !== "string") {
+    throw new Error(`cache row.${key} expected string, got ${typeof v}`);
+  }
+  return v;
+}
+
+function expectNum(r: Record<string, unknown>, key: string): number {
+  const v = r[key];
+  if (typeof v === "number") return v;
+  if (typeof v === "bigint") return Number(v);
+  throw new Error(`cache row.${key} expected number, got ${typeof v}`);
+}
+
+/**
+ * Test-only re-exports of the row validators. Production code never
+ * calls them directly — they run inline as part of every Cache.* read —
+ * but the throw paths protect callers from corrupted DB state and need
+ * direct exercise. SQLite's TEXT-affinity coercion makes it
+ * impractical to provoke them via on-disk corruption alone.
+ */
+export const __testInternals = { expectStr, expectNum };

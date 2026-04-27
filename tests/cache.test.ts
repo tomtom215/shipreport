@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Cache } from "../src/cache.js";
+import { Cache, __testInternals as cacheValidators } from "../src/cache.js";
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -67,5 +67,19 @@ describe("Cache", () => {
     // Empty store → prune returns 0 (covers the COALESCE/?? branch).
     expect(c.prune()).toBe(0);
     c.close();
+  });
+
+  it("row validators throw on wrong column types and accept the right ones", () => {
+    const { expectStr, expectNum } = cacheValidators;
+    // Throw paths: turn corrupted DB state into a loud error rather
+    // than silently feeding a junk row into the caller.
+    expect(() => expectStr({ k: 7 }, "k")).toThrow(/expected string, got number/);
+    expect(() => expectStr({ k: null }, "k")).toThrow(/expected string, got object/);
+    expect(() => expectNum({ k: "7" }, "k")).toThrow(/expected number, got string/);
+
+    // Happy paths.
+    expect(expectStr({ k: "ok" }, "k")).toBe("ok");
+    expect(expectNum({ k: 42 }, "k")).toBe(42);
+    expect(expectNum({ k: 9007199254740993n }, "k")).toBe(9007199254740993);
   });
 });

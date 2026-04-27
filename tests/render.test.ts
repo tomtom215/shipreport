@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { mdToHtml, readPackageVersion, writeReport } from "../src/render.js";
+import {
+  mdToHtml,
+  readPackageVersion,
+  resolveTemplateDir,
+  writeReport,
+} from "../src/render.js";
 
 async function freshDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "shipreport-render-"));
@@ -73,5 +78,21 @@ describe("readPackageVersion", () => {
     // just that we get a non-fallback semver-ish string.
     expect(v).toMatch(/^\d+\.\d+\.\d+/);
     expect(v).not.toBe("0.0.0");
+  });
+});
+
+describe("resolveTemplateDir", () => {
+  it("returns the first existing candidate", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "shipreport-tpl-"));
+    expect(resolveTemplateDir([dir, "/definitely/missing/x"])).toBe(dir);
+  });
+
+  it("falls back to the first candidate when none exist (lets Eta surface a clean ENOENT)", () => {
+    const fake = "/tmp/shipreport-test-no-such-dir-existence-check";
+    expect(resolveTemplateDir([fake, "/another/missing/x"])).toBe(fake);
+  });
+
+  it("throws when given an empty candidate list", () => {
+    expect(() => resolveTemplateDir([])).toThrow(/no candidates supplied/);
   });
 });

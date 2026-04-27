@@ -7,11 +7,32 @@ import { tokenSourceFromConfig } from "./token-source.js";
 import { auditLogFor, openState, runTeam, scheduleStoreFor } from "./run.js";
 import { isDueSince, parseCron } from "./schedule.js";
 import { buildManifest, loadOrGenerateKey, signManifest } from "./sign.js";
+import type { StateDB } from "./state.js";
+import { VERSION } from "./version.js";
 
 function logger(verbose: boolean) {
   return (msg: string): void => {
     if (verbose) console.error(`[shipreport] ${msg}`);
   };
+}
+
+/**
+ * Open the state DB or exit 2 with a uniform error message. Used by
+ * every audit / schedule subcommand: the shape (`audit.enabled: false →
+ * stderr + exit 2`) is part of the CLI contract — automation pipes the
+ * stderr line into observability — so we centralise it instead of
+ * duplicating it across each command. Returns a non-null StateDB on
+ * success.
+ */
+async function requireState(
+  cfg: Awaited<ReturnType<typeof loadConfig>>,
+): Promise<StateDB> {
+  const state = await openState(cfg);
+  if (!state) {
+    console.error("audit.enabled: false");
+    process.exit(2);
+  }
+  return state;
 }
 
 const run = defineCommand({
@@ -168,6 +189,9 @@ const scheduleTick = defineCommand({
     const log = logger(args.verbose);
     const state = await openState(cfg);
     if (!state) {
+      // Scheduler-specific message because operators reading the log
+      // need to know WHY enabling audit is the fix, not just that it's
+      // off. Other audit subcommands use the generic requireState().
       console.error("audit.enabled: false — scheduler requires state DB to be available.");
       process.exit(2);
     }
@@ -237,11 +261,7 @@ const auditTail = defineCommand({
   },
   async run({ args }) {
     const cfg = await loadConfig(args.config);
-    const state = await openState(cfg);
-    if (!state) {
-      console.error("audit.enabled: false");
-      process.exit(2);
-    }
+    const state = await requireState(cfg);
     const audit = auditLogFor(state);
     const rows = audit.tail(Number(args.limit), args.since);
     if (args.json) {
@@ -265,11 +285,7 @@ const auditVerify = defineCommand({
   args: { config: { type: "string", required: true } },
   async run({ args }) {
     const cfg = await loadConfig(args.config);
-    const state = await openState(cfg);
-    if (!state) {
-      console.error("audit.enabled: false");
-      process.exit(2);
-    }
+    const state = await requireState(cfg);
     const audit = auditLogFor(state);
     const res = audit.verify();
     state.close();
@@ -299,11 +315,7 @@ const auditExport = defineCommand({
       process.exit(2);
     }
     const cfg = await loadConfig(args.config);
-    const state = await openState(cfg);
-    if (!state) {
-      console.error("audit.enabled: false");
-      process.exit(2);
-    }
+    const state = await requireState(cfg);
     const audit = auditLogFor(state);
     const rows = audit.readForward(args.since);
     process.stdout.write(exportJsonl(rows));
@@ -328,11 +340,7 @@ const auditSnapshot = defineCommand({
   },
   async run({ args }) {
     const cfg = await loadConfig(args.config);
-    const state = await openState(cfg);
-    if (!state) {
-      console.error("audit.enabled: false");
-      process.exit(2);
-    }
+    const state = await requireState(cfg);
     const audit = auditLogFor(state);
     const head = audit.head();
     const keyPath = resolveHome(args.signKey ?? cfg.audit.signingKeyPath);
@@ -468,7 +476,7 @@ const doctor = defineCommand({
 export const main = defineCommand({
   meta: {
     name: "shipreport",
-    version: "0.2.0",
+    version: VERSION,
     description: "Quarterly engineering success story generator.",
   },
   subCommands: {

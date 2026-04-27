@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { AuditLog } from "../src/audit.js";
+import { AuditLog, __testInternals } from "../src/audit.js";
 import { StateDB } from "../src/state.js";
 
 async function tmp(): Promise<string> {
@@ -179,5 +179,59 @@ describe("AuditLog", () => {
     // is `at`). Just assert that both rows verify independently.
     expect(r1.prevHash).toBe("0".repeat(64));
     expect(r2.prevHash).toBe("0".repeat(64));
+  });
+});
+
+describe("AuditLog row validators (parseRawRow / expectString / expectInt)", () => {
+  // The validators replaced a set of unchecked `as` casts. Their throw
+  // paths are the runtime safety net that lets the rest of audit.ts stay
+  // free of `any`. SOC2-grade per-file coverage demands they're exercised.
+  const { parseRawRow, expectString, expectInt } = __testInternals;
+
+  it("parseRawRow throws on a non-object input", () => {
+    expect(() => parseRawRow(null)).toThrow(/not an object/);
+    expect(() => parseRawRow(42)).toThrow(/not an object/);
+    expect(() => parseRawRow("row")).toThrow(/not an object/);
+  });
+
+  it("expectString throws when the column is the wrong type", () => {
+    expect(() => expectString({ x: 7 }, "x")).toThrow(/expected string, got number/);
+    expect(() => expectString({ x: null }, "x")).toThrow(/expected string, got object/);
+    // Sanity: the happy path still works.
+    expect(expectString({ x: "ok" }, "x")).toBe("ok");
+  });
+
+  it("expectInt accepts numbers and bigints, rejects everything else", () => {
+    expect(expectInt({ x: 5 }, "x")).toBe(5);
+    expect(expectInt({ x: 9007199254740993n }, "x")).toBe(9007199254740993);
+    expect(() => expectInt({ x: "5" }, "x")).toThrow(/expected integer, got string/);
+    expect(() => expectInt({ x: 1.5 }, "x")).toThrow(/expected integer/);
+  });
+
+  it("parseRawRow promotes a SQLite row into a strict RawRow shape", () => {
+    const row = parseRawRow({
+      seq: 1,
+      at: "2026-01-01T00:00:00.000Z",
+      actor: "alice",
+      event: "run_started",
+      target: null,
+      payload: "{}",
+      prev_hash: "0".repeat(64),
+      hash: "a".repeat(64),
+    });
+    expect(row.seq).toBe(1);
+    expect(row.target).toBeNull();
+    // Same row but with a populated target: must round-trip as string.
+    const row2 = parseRawRow({
+      seq: 2,
+      at: "2026-01-01T00:00:00.000Z",
+      actor: "alice",
+      event: "run_started",
+      target: "acme/team",
+      payload: "{}",
+      prev_hash: "0".repeat(64),
+      hash: "a".repeat(64),
+    });
+    expect(row2.target).toBe("acme/team");
   });
 });
