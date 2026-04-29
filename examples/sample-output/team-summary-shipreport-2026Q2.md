@@ -1,6 +1,6 @@
 # Team Summary — 2026Q2
 
-**Manager:** tomtom215  ·  **Period:** 2026-04-01 → 2026-06-30
+**Manager:** alice  ·  **Period:** 2026-04-01 → 2026-06-30
 
 ## The quarter in numbers
 
@@ -11,16 +11,16 @@
 
 ## Highlights by person
 
-### tomtom215
+### alice
 
-- 3 PRs merged (0 features, 1 fixes), 3 reviews given
-- Top PR: [feat(extract): timezone-aware quarter boundaries](https://github.com/tomtom215/shipreport/pull/10) (`tomtom215/shipreport#10`)
+- 3 PRs merged (0 features, 1 fix), 3 reviews given
+- Top PR: [feat(extract): timezone-aware quarter boundaries](https://example.com/example-org/example-repo/pull/10) (`example-org/example-repo#10`)
 - Milestones: v0.3 release quality
 
 ### claude-bot
 
-- 3 PRs merged (0 features, 1 fixes), 2 reviews given
-- Top PR: [refactor(extract): concurrency pool + incremental cache](https://github.com/tomtom215/shipreport/pull/12) (`tomtom215/shipreport#12`)
+- 3 PRs merged (0 features, 1 fix), 2 reviews given
+- Top PR: [refactor(extract): concurrency pool + incremental cache](https://example.com/example-org/example-repo/pull/12) (`example-org/example-repo#12`)
 
 ---
 

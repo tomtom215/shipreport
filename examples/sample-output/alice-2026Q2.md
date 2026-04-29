@@ -1,6 +1,6 @@
-# tomtom215 — 2026Q2 Success Story
+# alice — 2026Q2 Success Story
 
-**Manager:** tomtom215  ·  **Period:** 2026-04-01 → 2026-06-30
+**Manager:** alice  ·  **Period:** 2026-04-01 → 2026-06-30
 
 ## Headline
 
@@ -9,7 +9,7 @@ Delivered 3 merged PRs across 1 repo.
 ## Quantified impact
 
 - **3** pull requests merged
-  (0 features, 1 fixes, 1 refactors, 0 infra, 1 docs, 0 other)
+  (0 features, 1 fix, 1 refactor, 0 infra, 1 docs, 0 other)
 - **15** files touched across **1** service
 - **3** code reviews given on teammates' PRs
 - **2** issues closed via linked PRs
@@ -19,23 +19,23 @@ Delivered 3 merged PRs across 1 repo.
 
 ### feat(extract): timezone-aware quarter boundaries
 
-- Repo: `tomtom215/shipreport` · PR [#10](https://github.com/tomtom215/shipreport/pull/10) · merged 2026-04-12
+- Repo: `example-org/example-repo` · PR [#10](https://example.com/example-org/example-repo/pull/10) · merged 2026-04-12
 - Reviewers: claude-bot, reviewer-a
-- Linked issues: tomtom215/shipreport#7
+- Linked issues: example-org/example-repo#7
 - Why it mattered: _Quarter windows now resolve in the team's timezone via Intl.DateTimeFormat._
 
 ### refactor(extract): concurrency pool + incremental cache
 
-- Repo: `tomtom215/shipreport` · PR [#12](https://github.com/tomtom215/shipreport/pull/12) · merged 2026-04-18
-- Reviewers: tomtom215
+- Repo: `example-org/example-repo` · PR [#12](https://example.com/example-org/example-repo/pull/12) · merged 2026-04-18
+- Reviewers: alice
 - Linked issues: —
 - Why it mattered: _Split per-repo fetch into a bounded pool; cache snapshots keyed by (repo, quarter, tz)._
 
 ### fix(transform): subtract reverted PRs from original author
 
-- Repo: `tomtom215/shipreport` · PR [#11](https://github.com/tomtom215/shipreport/pull/11) · merged 2026-04-15
+- Repo: `example-org/example-repo` · PR [#11](https://example.com/example-org/example-repo/pull/11) · merged 2026-04-15
 - Reviewers: claude-bot
-- Linked issues: tomtom215/shipreport#9
+- Linked issues: example-org/example-repo#9
 - Why it mattered: _Closes #9_
 
 ## Collaboration & leadership
@@ -44,7 +44,7 @@ Provided 3 code reviews on teammates' pull requests; closed 2 linked issues.
 
 ## Suggested talking points
 
-- Reliability-focused quarter (1 fixes) — pair each fix with the incident or metric it improved.
+- Reliability-focused quarter (1 fix) — pair each fix with the incident or metric it improved.
 - Milestones delivered: v0.3 release quality — link the launch comms if any.
 
 ---

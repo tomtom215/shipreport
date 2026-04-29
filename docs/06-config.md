@@ -145,8 +145,13 @@ defaults:
 | `pdf`  | `puppeteer`         | Calibration committees that prefer PDF.              |
 | `png`  | `puppeteer`         | Embedding the rollup in a slide deck.                |
 
-`puppeteer` is an optional dep — install it explicitly:
-`pnpm add puppeteer`. It pulls ~400 MB of Chromium.
+`puppeteer` is **not** part of shipreport's `dependencies` or
+`optionalDependencies`, so a default `pnpm install` does **not** pull
+the ~400 MB Chromium download. If a team's `output.formats` includes
+`pdf` or `png`, install puppeteer explicitly in the same project where
+shipreport is installed (`pnpm add puppeteer`); shipreport dynamic-
+imports it at render time. The Docker image's `WITH_PDF=1` build-arg
+does the same install for you (see [10 · Docker](./10-deployment-docker.md)).
 
 ### `classification`
 
@@ -195,8 +200,15 @@ extract:
 
 | Field                | Default | Notes                                                                       |
 | -------------------- | ------- | --------------------------------------------------------------------------- |
-| `concurrency`        | `4`     | Max simultaneous per-repo GraphQL calls. Cap is 32; overridable on the CLI. |
+| `concurrency`        | `4`     | Max simultaneous per-repo GraphQL calls. Hard cap of 32 enforced in **both** the YAML schema and the `--concurrency` CLI override (passing 33 throws at parse time). |
 | `rateLimitThreshold` | `100`   | When `rateLimit.remaining` drops below this, shipreport degrades to serial. |
+
+> Pagination safety cap: each repo's PR fetch stops after 40 pages (50
+> PRs per page = 2,000 PRs per repo per quarter), even if the GraphQL
+> cursor reports more pages. This is a guard against runaway extracts
+> on misconfigured repos and is documented in `src/extract.ts`.
+> Realistic engineering teams never hit it; if you do, split the team
+> across multiple configs.
 
 ## CLI overrides
 

@@ -8,11 +8,11 @@
 
 ## Quantified impact
 
-- **<%= it.dev.prsMerged %>** pull requests merged
-  (<%= it.dev.prsByKind.feature %> features, <%= it.dev.prsByKind.bugfix %> fixes, <%= it.dev.prsByKind.refactor %> refactors, <%= it.dev.prsByKind.infra %> infra, <%= it.dev.prsByKind.docs %> docs, <%= it.dev.prsByKind.other %> other)
-- **<%= it.dev.filesTouched %>** files touched across **<%= it.dev.crossRepoCollaboration %>** service<%= it.dev.crossRepoCollaboration === 1 ? "" : "s" %>
-- **<%= it.dev.reviewsGiven %>** code reviews given on teammates' PRs
-- **<%= it.dev.linkedIssuesClosed.length %>** issue<%= it.dev.linkedIssuesClosed.length === 1 ? "" : "s" %> closed via linked PRs
+- **<%= it.dev.prsMerged %>** pull <%= it.fmt.plural(it.dev.prsMerged, "request") %> merged
+  (<%= it.dev.prsByKind.feature %> <%= it.fmt.plural(it.dev.prsByKind.feature, "feature") %>, <%= it.dev.prsByKind.bugfix %> <%= it.fmt.plural(it.dev.prsByKind.bugfix, "fix", "fixes") %>, <%= it.dev.prsByKind.refactor %> <%= it.fmt.plural(it.dev.prsByKind.refactor, "refactor") %>, <%= it.dev.prsByKind.infra %> infra, <%= it.dev.prsByKind.docs %> docs, <%= it.dev.prsByKind.other %> other)
+- **<%= it.dev.filesTouched %>** <%= it.fmt.plural(it.dev.filesTouched, "file") %> touched across **<%= it.dev.crossRepoCollaboration %>** <%= it.fmt.plural(it.dev.crossRepoCollaboration, "service") %>
+- **<%= it.dev.reviewsGiven %>** code <%= it.fmt.plural(it.dev.reviewsGiven, "review") %> given on teammates' PRs
+- **<%= it.dev.linkedIssuesClosed.length %>** <%= it.fmt.plural(it.dev.linkedIssuesClosed.length, "issue") %> closed via linked PRs
 <% if (it.dev.shippedMilestones.length > 0) { -%>
 - **Milestones shipped:** <%= it.dev.shippedMilestones.join(", ") %>
 <% } -%>

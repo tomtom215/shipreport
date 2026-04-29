@@ -8,10 +8,21 @@ import { dateRangeToQuarter, quarterLabelToRange as tzQuarterLabelToRange } from
 
 const QuarterLabel = z.string().regex(/^\d{4}Q[1-4]$/);
 
-const DateRange = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-});
+// String comparison on `YYYY-MM-DD` is correct lexicographically because
+// the regex above pins a fixed-width zero-padded form. We reject `from`
+// strictly after `to` (equality is allowed: a single-day range is still
+// well-formed). Empty windows would resolve to zero PRs at extract time
+// without any diagnostic, which is exactly the silent failure mode this
+// refinement exists to prevent — see docs/08-dry-run.md / 13.
+const DateRange = z
+  .object({
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .refine((r) => r.from <= r.to, {
+    message: "quarter date range: `from` must be on or before `to`",
+    path: ["from"],
+  });
 
 const Classification = z.object({
   bugfixLabels: z.array(z.string()).default(["bug", "hotfix", "p0", "p1"]),

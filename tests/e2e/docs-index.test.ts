@@ -34,6 +34,7 @@ const EXPECTED_PAGES = [
   "13-troubleshooting.md",
   "14-security.md",
   "15-faq.md",
+  "16-delivery.md",
 ];
 
 describe("docs/ index integrity", () => {

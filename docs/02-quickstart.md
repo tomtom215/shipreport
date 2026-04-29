@@ -51,6 +51,14 @@ In the GitHub repo where the workflow will live:
 | ----------------- | -------------- |
 | `SHIPREPORT_TOKEN` | The PAT from step 1. |
 
+> **Naming note**: the GitHub Actions secret is `SHIPREPORT_TOKEN`; the
+> environment variable shipreport itself reads is `SHIPREPORT_GITHUB_TOKEN`
+> (the longer name appears throughout the docs and in `shipreport doctor`
+> output). The reusable workflow's `secrets:` block does the rename for
+> you when you pass `shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}`.
+> If you're invoking shipreport directly (local CLI, Docker, systemd),
+> export the env var with its full name: `SHIPREPORT_GITHUB_TOKEN=...`.
+
 ## Step 3 — Add `shipreport.yaml`
 
 Create `shipreport.yaml` at the repo root. Minimum viable config:
@@ -81,44 +89,68 @@ documented in [06 · Configuration reference](./06-config.md).
 
 ## Step 4 — Add the workflow
 
-Create `.github/workflows/quarterly.yml`:
+Create `.github/workflows/shipreport.yml`. The pattern below is the
+recommended one: an **hourly cron** that delegates to
+`shipreport schedule tick`, which reads each team's per-team `schedule:`
+from `shipreport.yaml` and runs only the teams whose cron has come due.
+GitHub's hosted scheduler can drop or delay any individual minute under
+load — the hourly tick + per-team lookback covers that, so a delayed
+trigger never costs you a quarterly run.
+
+> **Replace the two `REPLACE_WITH_TAG_OR_SHA` placeholders below** with a
+> shipreport release tag (`v0.2.0`) or a 40-hex commit SHA before
+> committing. They are not real refs; GitHub will reject the workflow on
+> the first run if you leave them in. Latest tags:
+> <https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/releases>.
 
 ```yaml
-name: shipreport-quarterly
+name: shipreport
 on:
   workflow_dispatch:
     inputs:
       mode:
         description: "run | dry-run | doctor"
-        default: "run"
+        type: choice
+        options: [run, dry-run, doctor]
+        default: doctor
   schedule:
-    - cron: "0 14 1 1,4,7,10 *"
+    - cron: "0 * * * *"   # hourly; per-team `schedule:` decides what's due
 
 permissions:
   contents: read
 
 jobs:
   shipreport:
-    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+    # Same value here AND in `shipreport_ref:`. See examples/github-actions/.
+    uses: YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml@REPLACE_WITH_TAG_OR_SHA
     with:
       config: shipreport.yaml
-      mode: ${{ inputs.mode || 'run' }}
+      # Scheduled runs use `tick` (idempotent); manual dispatches use the
+      # operator's chosen mode (default: doctor — safe to run with no quota cost).
+      mode: ${{ github.event_name == 'schedule' && 'tick' || inputs.mode }}
+      shipreport_ref: REPLACE_WITH_TAG_OR_SHA
     secrets:
       shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
 ```
 
-This is `examples/github-actions/quarterly-pat.yml` verbatim. There are
-[App](../examples/github-actions/quarterly-app.yml),
-[hourly tick](../examples/github-actions/hourly-tick.yml), and
-[GHES](../examples/github-actions/ghes-self-hosted.yml) variants in the
-same folder.
+This is the same pattern as
+[`examples/github-actions/hourly-tick.yml`](../examples/github-actions/hourly-tick.yml),
+extended to also accept a manual `run`/`dry-run`/`doctor` dispatch.
+Variants for App auth, GHES, image-pinned, and PR-time validation:
+
+* [`quarterly-pat.yml`](../examples/github-actions/quarterly-pat.yml) — quarterly cron + PAT (use only when you accept that a delayed cron skips an entire quarter; prefer the hourly-tick pattern above).
+* [`quarterly-app.yml`](../examples/github-actions/quarterly-app.yml) — same shape, App auth.
+* [`hourly-tick.yml`](../examples/github-actions/hourly-tick.yml) — hourly tick, recommended for multi-team setups with mixed cadences.
+* [`ghes-self-hosted.yml`](../examples/github-actions/ghes-self-hosted.yml) — GHES on a self-hosted runner.
+* [`quarterly-image.yml`](../examples/github-actions/quarterly-image.yml) — runs a cosign-verified, digest-pinned shipreport image (SLSA-grade supply chain).
+* [`dry-run-on-pr.yml`](../examples/github-actions/dry-run-on-pr.yml) — secretless PR-time validator.
 
 ## Step 5 — Smoke-test with `doctor` mode
 
 Don't burn quota with a real run yet. Smoke-test:
 
-1. `Actions → shipreport-quarterly → Run workflow`
-2. **mode**: `doctor`
+1. `Actions → shipreport → Run workflow`
+2. **mode**: `doctor` (it's the dispatch default)
 3. Click **Run workflow**.
 
 Expected output in the job log:
@@ -132,16 +164,25 @@ GHES version:     github.com
 Base URL:         https://api.github.com
 Cache path:       /home/runner/.cache/shipreport/cache.sqlite
 Audit enabled:    true
+State path:       /home/runner/.local/share/shipreport/state.sqlite
 Teams:            checkout
 Scheduled teams:
   checkout: 0 14 1 1,4,7,10 *
 ```
 
+> **About `Token scopes:`**: shipreport prints whatever GitHub returns
+> in the `x-oauth-scopes` REST header. **Classic PATs** return a comma-
+> separated list (`repo, read:org`). **Fine-grained PATs and App
+> installation tokens** don't populate that header, so shipreport falls
+> back to the parenthetical literal `(fine-grained PAT or App
+> installation)`. Either form is healthy — see `src/github.ts:probeToken`
+> for the exact code path.
+
 If it fails, jump to [13 · Troubleshooting](./13-troubleshooting.md).
 
 ## Step 6 — Dispatch a real run
 
-1. Same workflow, **mode: run** (or leave blank — `run` is the default).
+1. Same workflow, **mode: run**.
 2. Wait ~30s.
 3. Download the `shipreport-<run_id>` artifact.
 
@@ -164,10 +205,16 @@ Open the manager-rollup `.md` first — that's the calibration pre-read.
 
 ## Step 7 — Let the schedule fire
 
-The workflow's `schedule:` cron runs in GitHub's hosted scheduler. Note
-that GitHub may delay scheduled runs by a few minutes during high load —
-that's intentional and harmless: the per-team `schedule:` field decides
-what's "due", and `tick` is idempotent.
+The workflow's `schedule:` cron is hourly and dispatches `tick`. Each
+hour, `tick` reads each team's `schedule:` from `shipreport.yaml`,
+checks the recorded `last_run_at` in the cached state DB, and runs only
+the teams that have a matching cron minute since their last successful
+run. Most hours that's a no-op — by design.
+
+GitHub's hosted scheduler can drop or delay any individual cron trigger
+during high load; the per-team scan window covers up to 365 days, so a
+missed hour is picked up at the next tick. `tick` is idempotent: if the
+same minute matches twice (manual + scheduled), only one run fires.
 
 You're done.
 

@@ -12,16 +12,30 @@
 #   * `shipreport.yaml` at the repo root.
 #   * Secret SHIPREPORT_TOKEN (PAT) or SHIPREPORT_APP_PRIVATE_KEY (App).
 #
-# REPLACE THE DIGEST below before merging. Resolve a fresh digest with:
-#   crane digest ghcr.io/tomtom215/shipreport:v0.2.0
+# REPLACE THE DIGEST below before merging. The 64-zero placeholder
+# (`sha256:0000…0000`) is intentionally invalid: a stale-by-mistake commit
+# will fail at `cosign verify` rather than silently running the wrong
+# image. Resolve a fresh digest with:
+#   crane digest ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0
 #   # OR
-#   docker buildx imagetools inspect ghcr.io/tomtom215/shipreport:v0.2.0 \
+#   docker buildx imagetools inspect ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0 \
 #     | grep '^Digest:'
 #
 # Verify the signature locally before pinning:
-#   cosign verify ghcr.io/tomtom215/shipreport:v0.2.0 \
-#     --certificate-identity-regexp 'https://github.com/tomtom215/shipreport/.+' \
+#   cosign verify ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0 \
+#     --certificate-identity-regexp 'https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/.+' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#
+# Third-party action `uses:` lines below are pinned to 40-hex commit SHAs
+# (with the human-readable tag in a trailing comment) to give every
+# operator the SLSA-grade supply-chain anchor that shipreport's own CI
+# uses. Refresh the SHAs when bumping action versions.
+#
+# CAVEAT — quarterly cron: as with quarterly-pat.yml / quarterly-app.yml,
+# this workflow's cron fires only four times a year. A delayed trigger
+# means the run is skipped for the entire quarter. For delay-resistant
+# deploys, prefer hourly-tick.yml (you can still pin the image digest by
+# overriding the reusable workflow's behaviour with your own runner).
 
 name: shipreport-quarterly-image
 
@@ -47,12 +61,12 @@ jobs:
       # REPLACE: digest pinning is the entire point of this pattern.
       # The `tag@digest` form ensures docker run pulls EXACTLY this
       # image even if the tag is later moved.
-      SHIPREPORT_IMAGE: ghcr.io/tomtom215/shipreport:v0.2.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      SHIPREPORT_IMAGE: ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Restore state cache
-        uses: actions/cache@v4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             shipreport-state
@@ -62,12 +76,12 @@ jobs:
             shipreport-state-${{ github.ref_name }}-
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
       - name: Verify image signature (Sigstore keyless)
         run: |
           cosign verify "${SHIPREPORT_IMAGE}" \
-            --certificate-identity-regexp 'https://github.com/tomtom215/shipreport/.+' \
+            --certificate-identity-regexp 'https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/.+' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
       - name: Pull image
@@ -95,7 +109,7 @@ jobs:
             -v "${{ github.workspace }}/shipreport-cache:/home/shipreport/.cache/shipreport" \
             "${SHIPREPORT_IMAGE}" "$@"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() && hashFiles('out/**/*') != '' }}
         with:
           name: shipreport-${{ github.run_id }}

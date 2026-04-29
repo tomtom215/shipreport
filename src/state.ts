@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, chmod, stat } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -27,6 +27,29 @@ export class StateDB {
     await mkdir(path.dirname(dbPath), { recursive: true });
     const db = new DatabaseSync(dbPath);
     db.exec(`PRAGMA journal_mode=WAL;`);
+    // Defense-in-depth: the audit log holds chain hashes, run identifiers
+    // and event payloads. None of those are strict secrets, but the
+    // README's emphasis on compliance evidence and the per-file 0600 key
+    // mode justify the same posture for the DB itself. WAL/SHM siblings
+    // (-wal / -shm) inherit the file mode SQLite is configured with;
+    // we chmod them too if they exist so an `ls -la` from another user
+    // doesn't reveal partial writes either.
+    /* c8 ignore start — chmod failures (read-only mounts, foreign FS)
+       are non-fatal: the DB is functional, the mode is a hardening hint,
+       and unit tests on POSIX cover the happy path. */
+    try {
+      await chmod(dbPath, 0o600);
+      for (const sib of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+        const exists = await stat(sib).then(
+          () => true,
+          () => false,
+        );
+        if (exists) await chmod(sib, 0o600);
+      }
+    } catch {
+      // best-effort
+    }
+    /* c8 ignore stop */
     db.exec(`
       CREATE TABLE IF NOT EXISTS audit_log (
         seq         INTEGER PRIMARY KEY AUTOINCREMENT,

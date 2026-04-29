@@ -1,5 +1,11 @@
 # shipreport
 
+> **Just unpacked this archive?** Read **[`HANDOFF.md`](./HANDOFF.md)**
+> first — it walks you from "I have a directory of files" to a working
+> first run, with every prerequisite, every command, and every common
+> failure mode. The rest of this README is the design pitch and
+> reference material; HANDOFF.md is the operations manual.
+
 Draft quarterly success stories from GitHub data — one developer per page, one
 rollup per team, zero prose about people you haven't already lived with. Point
 shipreport at an org, declare your teams and their schedules, and it stitches
@@ -23,27 +29,43 @@ github.com and GitHub Enterprise Server. Fine-grained PATs and GitHub App
 installation tokens both supported. No data leaves your network unless you
 choose to ship the audit log somewhere.
 
-**End-user docs**: see [`docs/`](./docs/) — a 16-page index covering
-prerequisites, all three auth flows (PAT / App / GHES), every supported
-deployment pattern, dry-run methodology, the audit-log model, and
-troubleshooting. Start at [`docs/02-quickstart.md`](./docs/02-quickstart.md)
-for a 10-minute go-live.
+**End-user docs**: see [`docs/`](./docs/) — 17 numbered pages (00
+Overview through 16 Delivery) plus an index, covering prerequisites,
+all three auth flows (PAT / App / GHES), every supported deployment
+pattern, dry-run methodology, the audit-log model, troubleshooting,
+and how to get reports into a non-technical manager's inbox. Start at
+[`docs/02-quickstart.md`](./docs/02-quickstart.md) for a 10-minute
+go-live.
 
 ---
 
 ## Quick start
 
-```bash
-pnpm add -g shipreport            # or: npx shipreport
+> **First time? You probably want [`HANDOFF.md`](./HANDOFF.md).** That
+> document walks an operator from "I just unzipped this" to a working
+> first run, with every prerequisite, every command, and every common
+> failure mode covered. The rest of this README is the design pitch
+> and reference material; HANDOFF.md is the operations manual.
 
+The core commands once shipreport is built (`pnpm install && pnpm build`):
+
+```bash
 # PAT (simplest for small orgs)
 export SHIPREPORT_GITHUB_TOKEN=ghp_...
-shipreport run --config shipreport.yaml --all
+node bin/shipreport.js run --config shipreport.yaml --all
 
 # GitHub App (recommended for enterprise; see examples/shipreport.yaml)
 export SHIPREPORT_APP_PRIVATE_KEY="$(cat app.pem)"
-shipreport run --config shipreport.yaml --team checkout
+node bin/shipreport.js run --config shipreport.yaml --team checkout
 ```
+
+shipreport is delivered as source. There is no `pnpm add -g shipreport`
+or `npx shipreport` step — the package is not published to the public
+npm registry. After `pnpm build`, the working binary is
+`./bin/shipreport.js` (or `node bin/shipreport.js` on systems where the
+shebang isn't honoured). Add `./bin` to your `$PATH`, symlink
+`bin/shipreport.js` into `/usr/local/bin`, or invoke it directly — your
+call.
 
 Outputs land in `./out/` as Markdown + HTML (+ optional PDF / PNG):
 
@@ -414,9 +436,10 @@ ready-to-use:
   root, so the upstream mirror stays green.
 * **Reusable workflow**:
   [`.github/workflows/reusable-shipreport.yml`](./.github/workflows/reusable-shipreport.yml) —
-  callable from any repo. Five copy-paste callers in
-  [`examples/github-actions/`](./examples/github-actions/) cover PAT,
-  App, hourly tick, GHES self-hosted, and PR-time validation.
+  callable from any repo. Six copy-paste callers in
+  [`examples/github-actions/`](./examples/github-actions/) cover hourly
+  tick (recommended), quarterly PAT, quarterly App, GHES self-hosted,
+  cosign-verified digest-pinned image, and PR-time validation.
 * **Audit export**:
   [`.github/workflows/audit-export.yml`](./.github/workflows/audit-export.yml) —
   daily JSONL + signed snapshot of the audit chain, uploaded as an
@@ -433,10 +456,19 @@ Full operator manual is in [`docs/`](./docs/) — start at
 pnpm install
 pnpm typecheck       # tsc --noEmit
 pnpm lint            # eslint src tests
-pnpm test            # 167 tests, ~3s
-pnpm test:coverage   # v8 coverage; gate at 85% for src/ (cli.ts excluded)
+pnpm test            # 306 tests, ~10s (vitest, forks pool)
+pnpm test:coverage   # v8 coverage; gates configured in vitest.config.ts
 pnpm build           # tsc + copy templates → dist/
 ```
+
+Coverage floors (set in `vitest.config.ts`, enforced by CI):
+
+* Global: 95% lines / 95% functions / 85% branches / 95% statements.
+* Per-file (SOC2 evidence path — see `docs/12-audit-log.md`):
+  * `src/audit.ts`, `src/audit-export.ts` — 100% lines / 100% functions / 100% statements / 95% (audit.ts) and 90% (audit-export.ts) branches.
+  * `src/sign.ts`, `src/state.ts` — 100% lines / 100% functions / 100% statements / 85% and 90% branches respectively.
+
+Only `src/types.ts`, `src/templates/**`, and `src/cli-main.ts` (a one-line shim) are excluded from coverage. `src/cli.ts` is fully covered.
 
 Render tests are golden-file tests: run `UPDATE_GOLDEN=1 pnpm test` to
 regenerate `tests/fixtures/*.md` after an intentional template change.
@@ -480,10 +512,10 @@ shipreport supports Node `>=22.13.0` per `package.json`.
 
 Every PR runs:
 
-- `pnpm typecheck`, `pnpm lint`, `pnpm test:coverage` (85% floor)
+- `pnpm typecheck`, `pnpm lint`, `pnpm test:coverage` (gates listed above)
 - `pnpm audit --prod --audit-level=high`
 - actionlint on `.github/workflows/*.yml`
-- markdownlint-cli2 on `examples/sample-output/**/*.md`
+- markdownlint-cli2 on `examples/sample-output/**/*.md` and `docs/**/*.md`
 
 HTML coverage report is uploaded as a CI artifact on every run.
 

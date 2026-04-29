@@ -144,12 +144,21 @@ Expected output:
 Auth kind:        pat
 Identity:         pat:env:SHIPREPORT_GITHUB_TOKEN
 Authenticated as: <your-username>
-Token scopes:     repo (or fine-grained list)
+Token scopes:     repo
 GHES version:     3.13.0
 Base URL:         https://ghe.example.com/api/v3
 ```
 
 A non-empty `GHES version` confirms the URLs are right.
+
+The `Token scopes:` line shows whatever GitHub Enterprise returned in
+the `x-oauth-scopes` REST header. Classic PATs (still the only form
+some older GHES versions support — see "Auth choice on GHES" above)
+return a comma-separated scope list like `repo, read:org`. Fine-grained
+PATs and App installation tokens don't populate that header, so
+shipreport falls back to the literal `(fine-grained PAT or App
+installation)`. See [02 · Quickstart](./02-quickstart.md#step-5--smoke-test-with-doctor-mode)
+for the canonical explanation.
 
 ## Common pitfalls
 

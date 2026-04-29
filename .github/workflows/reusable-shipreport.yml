@@ -13,7 +13,7 @@ name: reusable-shipreport
 #       - cron: "0 14 1 1,4,7,10 *"
 #   jobs:
 #     run:
-#       uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@main
+#       uses: YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml@main
 #       with:
 #         config: shipreport.yaml
 #         mode: run            # or 'dry-run' / 'doctor'
@@ -128,7 +128,7 @@ jobs:
       - name: Check out shipreport source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          repository: tomtom215/shipreport
+          repository: YOUR-GITHUB-OWNER/YOUR-FORK
           ref: ${{ inputs.shipreport_ref }}
           path: shipreport
 

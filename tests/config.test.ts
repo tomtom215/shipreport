@@ -173,6 +173,65 @@ describe("resolveQuarter", () => {
   });
 });
 
+describe("date range schema validation", () => {
+  // The schema rejects `from > to` ranges — without this guard, an
+  // operator typo silently produces zero PRs at extract time. See
+  // docs/08-dry-run.md and docs/13-troubleshooting.md.
+  it("accepts a range where from < to", () => {
+    expect(() =>
+      normalize({
+        org: "acme",
+        teams: [
+          { name: "t", manager: "j", members: ["a"], repos: ["acme/r"] },
+        ],
+        defaults: { quarter: { from: "2026-01-01", to: "2026-03-31" } },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts a single-day range where from == to", () => {
+    expect(() =>
+      normalize({
+        org: "acme",
+        teams: [
+          { name: "t", manager: "j", members: ["a"], repos: ["acme/r"] },
+        ],
+        defaults: { quarter: { from: "2026-04-15", to: "2026-04-15" } },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a reversed range where from > to (defaults.quarter)", () => {
+    expect(() =>
+      normalize({
+        org: "acme",
+        teams: [
+          { name: "t", manager: "j", members: ["a"], repos: ["acme/r"] },
+        ],
+        defaults: { quarter: { from: "2026-04-01", to: "2026-01-01" } },
+      }),
+    ).toThrow(/from.*must be on or before.*to/);
+  });
+
+  it("rejects a reversed range where from > to (team.quarter)", () => {
+    expect(() =>
+      normalize({
+        org: "acme",
+        teams: [
+          {
+            name: "t",
+            manager: "j",
+            members: ["a"],
+            repos: ["acme/r"],
+            quarter: { from: "2026-04-01", to: "2026-01-01" },
+          },
+        ],
+        defaults: { quarter: "2026Q1" },
+      }),
+    ).toThrow(/from.*must be on or before.*to/);
+  });
+});
+
 describe("loadConfig (file-on-disk path)", () => {
   it("reads YAML from a file and returns a normalized Config", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "shipreport-loadcfg-"));

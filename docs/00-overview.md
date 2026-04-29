@@ -21,8 +21,9 @@ out/
 └── manager-rollup-checkout-2026Q1.md     # one-page calibration pre-read
 ```
 
-PDF and PNG outputs are opt-in (require `puppeteer`, ~400 MB). See
-[06 · Configuration reference](./06-config.md).
+PDF and PNG outputs are opt-in: `puppeteer` is **not** in shipreport's
+default install — operators who need them run `pnpm add puppeteer`
+(~400 MB Chromium). See [06 · Configuration reference](./06-config.md).
 
 ## What it counts
 
@@ -42,18 +43,25 @@ the configured quarter window, in the configured timezone.
 
 ## Run modes
 
-| Mode                                | Where it lives                                             |
-| ----------------------------------- | ---------------------------------------------------------- |
-| Local CLI                           | `npx shipreport run --config shipreport.yaml --all`        |
-| Docker                              | `docker run … shipreport run --config /cfg/… --all`        |
-| **Scheduled GitHub Action**         | `.github/workflows/tick.yml` (this is the recommended one) |
-| Reusable GH Action                  | `.github/workflows/reusable-shipreport.yml`                |
+| Mode                                | Where it lives                                              |
+| ----------------------------------- | ----------------------------------------------------------- |
+| Local CLI                           | `node bin/shipreport.js run --config shipreport.yaml --all` |
+| Docker                              | `docker run … shipreport run --config /cfg/… --all`         |
+| **Scheduled GitHub Action**         | `.github/workflows/tick.yml` (recommended once you push to GitHub) |
+| Reusable GH Action                  | `.github/workflows/reusable-shipreport.yml`                 |
 | systemd timer / Kubernetes CronJob  | Calls the same CLI; see [11](./11-deployment-local-cron.md) |
 
-The narrow pitch of this docs tree: **GitHub Actions is the primary
-deployment** because the auth, secrets, scheduling, retention, and audit
-log all already exist there. The other modes are documented for
-completeness.
+**For ZIP-delivered installs, start with the local CLI** — it has the
+fewest moving parts and works without any GitHub Actions setup. See
+[`HANDOFF.md`](../HANDOFF.md) at the repo root for the bootstrapping
+walkthrough.
+
+GitHub Actions is the most batteries-included deployment for operators
+who already own a GitHub repo where they want shipreport's workflows to
+live: auth, secrets, scheduling, artifact retention, and the audit-log
+evidence pipeline are all native. The other modes (local CLI, Docker,
+systemd) are documented for completeness and are first-class — none of
+them is a downgrade.
 
 ## What it deliberately doesn't do
 

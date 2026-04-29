@@ -11,17 +11,20 @@ secrets, scheduling, OIDC, and audit-artifact retention are already there.
 
 | Pattern                                                | When to use                                                | Workflow file                                                                           |
 | ------------------------------------------------------ | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Quarterly run, PAT auth                                 | Single team, github.com, simplest possible                  | [`examples/github-actions/quarterly-pat.yml`](../examples/github-actions/quarterly-pat.yml) |
-| Quarterly run, App auth                                 | Enterprise, multiple teams, audit-friendly                  | [`examples/github-actions/quarterly-app.yml`](../examples/github-actions/quarterly-app.yml) |
-| Hourly tick (multi-team, mixed cadences)                | Two or more teams with different per-team `schedule:`       | [`examples/github-actions/hourly-tick.yml`](../examples/github-actions/hourly-tick.yml) |
+| Hourly tick (recommended; delay-resistant)              | Default for any new deploy. Reads each team's `schedule:`. | [`examples/github-actions/hourly-tick.yml`](../examples/github-actions/hourly-tick.yml) |
+| Quarterly run, PAT auth                                 | Single team, github.com; accept skipped-quarter risk on GH delay. | [`examples/github-actions/quarterly-pat.yml`](../examples/github-actions/quarterly-pat.yml) |
+| Quarterly run, App auth                                 | Same shape, App auth.                                       | [`examples/github-actions/quarterly-app.yml`](../examples/github-actions/quarterly-app.yml) |
 | GHES + self-hosted runner                               | GHES isn't internet-reachable                               | [`examples/github-actions/ghes-self-hosted.yml`](../examples/github-actions/ghes-self-hosted.yml) |
+| Cosign-verified, digest-pinned image                    | SLSA-grade supply chain; compliance forbids npm at run time. | [`examples/github-actions/quarterly-image.yml`](../examples/github-actions/quarterly-image.yml) |
 | PR-time validation (no secrets)                          | Every operator should enable this                            | [`examples/github-actions/dry-run-on-pr.yml`](../examples/github-actions/dry-run-on-pr.yml) |
 | Audit JSONL export                                      | SOC2 evidence pipeline                                       | [`.github/workflows/audit-export.yml`](../.github/workflows/audit-export.yml)            |
 | Reusable workflow (called from multiple repos)           | Multi-org operators                                          | [`.github/workflows/reusable-shipreport.yml`](../.github/workflows/reusable-shipreport.yml) |
 | Built-in tick template (operator forks the repo)        | Easiest first deploy if you don't mind a fork                | [`.github/workflows/tick.yml`](../.github/workflows/tick.yml)                            |
 
 The reusable workflow is the **recommended pattern**. Each example caller
-is a few lines that delegate to `tomtom215/shipreport/...@main`.
+delegates to `YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml`
+at a pinned ref (release tag or 40-hex commit SHA — see the example files
+for the exact form, and the "Pinning vs floating" section below).
 
 ## Anatomy of the reusable workflow
 
@@ -34,7 +37,7 @@ is a `workflow_call`-style workflow with these inputs:
 | `mode`            | `run`              | `run` / `dry-run` / `doctor` / `tick`.                           |
 | `team`            | `""` (`--all`)     | Team name; empty = all teams.                                    |
 | `quarter`         | `""`               | Override quarter, e.g. `2026Q2`.                                 |
-| `shipreport_ref`  | `main`             | Branch / tag / SHA to check shipreport's source out at.          |
+| `shipreport_ref`  | **(required, no default)** | Branch / tag / SHA to check shipreport's source out at. Forces every caller to make an explicit pinning decision. |
 | `runs_on`         | `ubuntu-latest`    | Runner label (override for self-hosted).                         |
 
 And these secrets:
@@ -48,7 +51,7 @@ And these secrets:
 What the workflow does, in order:
 
 1. Checks out the caller's repo (for `shipreport.yaml`).
-2. Checks out `tomtom215/shipreport` at `shipreport_ref`.
+2. Checks out `YOUR-GITHUB-OWNER/YOUR-FORK` at `shipreport_ref`.
 3. `pnpm install --frozen-lockfile && pnpm build` on shipreport.
 4. Restores the cached state DB (per-caller-repo, per-branch keys).
 5. Runs `shipreport doctor` as a preflight (cheap; fails fast on auth issues).
@@ -57,15 +60,26 @@ What the workflow does, in order:
 
 ## Pinning vs floating
 
-In all examples we use `@main` for clarity. For real deployments, **pin
-to a tag**:
+Every checked-in example uses a `REPLACE_WITH_TAG_OR_SHA` placeholder
+that an operator MUST replace before committing. The placeholder is
+deliberately not a real ref — GitHub rejects the workflow on the first
+run if you forget to substitute, which is the safe failure mode.
+
+For real deployments, **pin to a tag** (or a 40-hex SHA):
 
 ```yaml
-uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@v0.2.0
+uses: YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml@v0.2.0
+with:
+  shipreport_ref: v0.2.0   # same value as the @ above
 ```
 
-…and rely on Dependabot's `dependabot.yml` (already configured) to
-propose updates.
+`@main` is accepted by the reusable workflow but the workflow logs a
+warning when it sees a floating ref (`main` / `master` / `latest` /
+`HEAD`) — see `reusable-shipreport.yml` lines 119-126. Do not ship a
+floating ref to production. Dependabot's `dependabot.yml` (already
+configured) bumps GitHub Actions pins on a weekly cadence; the same
+schedule should propagate to your `shipreport_ref` pin via your normal
+review process.
 
 ## Caching state between runs
 

@@ -18,7 +18,7 @@ parts.
 
 [`docker/Dockerfile`](../docker/Dockerfile) builds a ~150 MB image:
 
-* `node:25-alpine` base, pinned by digest (Dependabot updates weekly).
+* `node:24-alpine` base, pinned by digest (Dependabot updates weekly).
 * `pnpm install --prod` only — no devDeps in the runtime layer.
 * Runs as user `shipreport` (uid `10001`), not root.
 * Two declared volumes for state + cache.
@@ -49,7 +49,7 @@ docker buildx build \
   --push
 ```
 
-This is what `release.yml` does on tag push to `tomtom215/shipreport`.
+This is what `release.yml` does on tag push to `YOUR-GITHUB-OWNER/YOUR-FORK`.
 
 ## Run
 
@@ -123,9 +123,9 @@ docker push registry.internal/node:24-alpine
 
 # 2. (Optional) the published shipreport image, if you'd rather use it
 #    than build from source.
-SHIPREPORT_DIGEST="sha256:<resolve via crane digest ghcr.io/tomtom215/shipreport:v0.2.0>"
-docker pull "ghcr.io/tomtom215/shipreport:v0.2.0@$SHIPREPORT_DIGEST"
-docker tag  "ghcr.io/tomtom215/shipreport:v0.2.0@$SHIPREPORT_DIGEST" \
+SHIPREPORT_DIGEST="sha256:<resolve via crane digest ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0>"
+docker pull "ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0@$SHIPREPORT_DIGEST"
+docker tag  "ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0@$SHIPREPORT_DIGEST" \
             registry.internal/shipreport:v0.2.0
 docker push registry.internal/shipreport:v0.2.0
 
@@ -262,7 +262,7 @@ runs would both try to write to the same SQLite file, which fails.
 
 ## Image signing & SBOM
 
-Released images at `ghcr.io/tomtom215/shipreport:<version>` are:
+Released images at `ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:<version>` are:
 
 * Multi-arch (amd64, arm64).
 * Cosign-signed keyless via Sigstore (verify with

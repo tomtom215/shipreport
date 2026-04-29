@@ -4,16 +4,16 @@
 
 ## The quarter in numbers
 
-- **<%= it.team.totals.prsMerged %>** PRs merged by the team
-- **<%= it.team.totals.reviewsGiven %>** code reviews given
-- **<%= it.team.totals.reposTouched %>** service<%= it.team.totals.reposTouched === 1 ? "" : "s" %> touched
-- **<%= it.team.totals.issuesClosed %>** linked issues closed
+- **<%= it.team.totals.prsMerged %>** <%= it.fmt.plural(it.team.totals.prsMerged, "PR") %> merged by the team
+- **<%= it.team.totals.reviewsGiven %>** code <%= it.fmt.plural(it.team.totals.reviewsGiven, "review") %> given
+- **<%= it.team.totals.reposTouched %>** <%= it.fmt.plural(it.team.totals.reposTouched, "service") %> touched
+- **<%= it.team.totals.issuesClosed %>** linked <%= it.fmt.plural(it.team.totals.issuesClosed, "issue") %> closed
 
 ## Highlights by person
 <% it.team.members.forEach(function(m){ %>
 ### <%= m.displayName %>
 
-- <%= m.prsMerged %> PRs merged (<%= m.prsByKind.feature %> features, <%= m.prsByKind.bugfix %> fixes), <%= m.reviewsGiven %> reviews given
+- <%= m.prsMerged %> <%= it.fmt.plural(m.prsMerged, "PR") %> merged (<%= m.prsByKind.feature %> <%= it.fmt.plural(m.prsByKind.feature, "feature") %>, <%= m.prsByKind.bugfix %> <%= it.fmt.plural(m.prsByKind.bugfix, "fix", "fixes") %>), <%= m.reviewsGiven %> <%= it.fmt.plural(m.reviewsGiven, "review") %> given
 <% if (m.topPRs.length > 0) { -%>
 - Top PR: [<%= m.topPRs[0].title %>](<%= m.topPRs[0].url %>) (`<%= m.topPRs[0].repo %>#<%= m.topPRs[0].number %>`)
 <% } -%>

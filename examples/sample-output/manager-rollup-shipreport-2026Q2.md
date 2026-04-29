@@ -1,15 +1,15 @@
 # Manager Rollup — 2026Q2
 
-**Manager:** tomtom215  ·  **Period:** 2026-04-01 → 2026-06-30
+**Manager:** alice  ·  **Period:** 2026-04-01 → 2026-06-30
 
 One row per direct report. Use this as the backbone of your skip-level pre-read.
 
 | Developer | PRs merged | Features | Fixes | Refactors | Reviews given | Services | Issues closed | Top PR |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| tomtom215 | 3 | 0 | 1 | 1 | 3 | 1 | 2 | [`tomtom215/shipreport#10`](https://github.com/tomtom215/shipreport/pull/10) |
-| claude-bot | 3 | 0 | 1 | 1 | 2 | 1 | 0 | [`tomtom215/shipreport#12`](https://github.com/tomtom215/shipreport/pull/12) |
+| alice | 3 | 0 | 1 | 1 | 3 | 1 | 2 | [`example-org/example-repo#10`](https://example.com/example-org/example-repo/pull/10) |
+| claude-bot | 3 | 0 | 1 | 1 | 2 | 1 | 0 | [`example-org/example-repo#12`](https://example.com/example-org/example-repo/pull/12) |
 
-**Team totals:** 6 PRs · 5 reviews · 2 issues closed across 1 services.
+**Team totals:** 6 PRs · 5 reviews · 2 issues closed across 1 service.
 
 ---
 
