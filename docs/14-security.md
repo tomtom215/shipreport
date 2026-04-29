@@ -85,7 +85,7 @@ Chromium is wrapped in a `<pre>` or escaped by markdown-it.
 | npm package                 | Published with `--provenance`. Verify with `npm audit signatures`.       |
 | Docker image                | Multi-arch, cosign-signed keyless via Sigstore.                          |
 | SBOM                        | CycloneDX JSON via syft, attached to each GitHub release.                |
-| Optional `puppeteer` dep    | Marked `optionalDependencies`; absent from default install.              |
+| Optional `puppeteer` dep    | Not declared in `package.json`; absent from a default `pnpm install`. Operators who need PDF/PNG output run `pnpm add puppeteer` explicitly (see `docs/06-config.md`). |
 
 ## Operator access patterns
 

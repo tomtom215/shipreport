@@ -4,9 +4,13 @@
 # repos:) BEFORE the bad config lands on main and starts firing every hour.
 #
 # ┌──────────────────────────────────────────────────────────────────┐
-# │  REPLACE THIS PIN BEFORE COPYING TO YOUR REPO                    │
-# │  The `ref:` below must be set to a SHA (40-hex) or release tag.  │
-# │  The value below is a placeholder SHA from this branch.          │
+# │  REQUIRED REPLACEMENTS                                           │
+# │  Every `REPLACE_WITH_TAG_OR_SHA` token below MUST be replaced     │
+# │  before this workflow is committed. It is NOT a real ref; GitHub  │
+# │  will reject the workflow on the first run if you leave it in.   │
+# │  Use a release tag (e.g. `v0.2.0`) or a 40-hex commit SHA.       │
+# │  Latest tags:                                                     │
+# │     https://github.com/tomtom215/shipreport/releases             │
 # │  Do NOT ship `@main` to production — see docs/14-security.md.    │
 # └──────────────────────────────────────────────────────────────────┘
 #
@@ -14,6 +18,11 @@
 #
 # Pre-requisites:
 #   * `shipreport.yaml` at the repo root.
+#
+# Note: third-party action `uses:` lines below are pinned to 40-hex commit
+# SHAs (with the human-readable tag in a trailing comment) to give every
+# operator the SLSA-grade supply-chain anchor that shipreport's own CI
+# uses. Refresh the SHAs when bumping action versions.
 
 name: shipreport-validate
 
@@ -30,17 +39,17 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Check out shipreport source (for the validator)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: tomtom215/shipreport
           # REPLACE: pin to the latest release tag or commit SHA.
-          ref: 0954c506f33472309b50bda30a48ba42a2288f12
+          ref: REPLACE_WITH_TAG_OR_SHA
           path: shipreport
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm

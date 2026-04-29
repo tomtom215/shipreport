@@ -69,7 +69,7 @@ describe("GitHub Actions workflow structure", () => {
     }
   });
 
-  it("every `uses:` step pins to a 40-hex commit SHA (SLSA-grade supply-chain anchor)", async () => {
+  it("every `uses:` step in .github/workflows pins to a 40-hex commit SHA (SLSA-grade supply-chain anchor)", async () => {
     const workflows = await loadWorkflows(path.join(ROOT, ".github", "workflows"));
     const offenders: string[] = [];
     // SHA40 = exactly 40 lowercase hex chars. The `# vX.Y.Z` trailer is
@@ -92,20 +92,81 @@ describe("GitHub Actions workflow structure", () => {
     expect(offenders.join("\n"), offenders.join("\n")).toEqual("");
   });
 
-  it("examples/github-actions caller workflows reference the in-repo reusable workflow", async () => {
+  it("every third-party `uses:` step in examples/github-actions pins to a 40-hex SHA", async () => {
+    // Mirrors the rule for .github/workflows above: caller examples in
+    // examples/github-actions/ are what operators copy verbatim, so they
+    // must hold the same supply-chain anchor as shipreport's own CI.
+    // The shipreport reusable-workflow `uses:` is exempt from this test —
+    // its pin is always the operator-supplied REPLACE_WITH_TAG_OR_SHA
+    // sentinel, which the next test below verifies independently.
     const examples = await loadWorkflows(path.join(ROOT, "examples", "github-actions"));
-    expect(examples.length).toBeGreaterThanOrEqual(4);
+    const SHA40_PIN = /^[\w./-]+@[a-f0-9]{40}(\s+#\s*v[\w.-]+)?$/;
+    const SHIPREPORT_REUSABLE = /^tomtom215\/shipreport\/.+@/;
+    const offenders: string[] = [];
+    for (const { file, doc } of examples) {
+      for (const [name, job] of Object.entries(doc.jobs ?? {})) {
+        // Caller-level `uses:` to shipreport's reusable workflow is the
+        // operator placeholder; checked elsewhere.
+        if (typeof job.uses === "string") continue;
+        for (const step of job.steps ?? []) {
+          if (!step.uses) continue;
+          if (SHIPREPORT_REUSABLE.test(step.uses)) continue;
+          if (!SHA40_PIN.test(step.uses)) {
+            offenders.push(`${path.relative(ROOT, file)}: ${name} -> ${step.uses}`);
+          }
+        }
+      }
+    }
+    expect(offenders.join("\n"), offenders.join("\n")).toEqual("");
+  });
+
+  it("examples/github-actions caller workflows reference the in-repo reusable workflow with the operator-replace placeholder", async () => {
+    const examples = await loadWorkflows(path.join(ROOT, "examples", "github-actions"));
+    // Six checked-in callers (hourly-tick, quarterly-pat, quarterly-app,
+    // quarterly-image, ghes-self-hosted, dry-run-on-pr); four use the
+    // reusable workflow. quarterly-image runs a published Docker image
+    // directly; dry-run-on-pr is self-contained.
+    expect(examples.length).toBeGreaterThanOrEqual(6);
     let matched = 0;
     for (const { doc } of examples) {
       for (const job of Object.values(doc.jobs ?? {})) {
         if (typeof job.uses === "string" && job.uses.includes("reusable-shipreport.yml")) {
           matched += 1;
+          // Every caller of the reusable workflow MUST use the operator-
+          // replace sentinel. A real SHA / tag would ship to operators
+          // who'd forget to swap it; the placeholder fails fast at GH's
+          // first workflow run, which is the safe failure mode.
+          expect(job.uses).toMatch(
+            /reusable-shipreport\.yml@REPLACE_WITH_TAG_OR_SHA$/,
+            `caller does not use the REPLACE_WITH_TAG_OR_SHA sentinel: ${String(job.uses)}`,
+          );
         }
       }
     }
-    // At least the four caller examples (PAT, App, hourly, GHES) should reference
-    // the reusable workflow. dry-run-on-pr.yml is self-contained.
     expect(matched).toBeGreaterThanOrEqual(4);
+  });
+
+  it("examples/github-actions caller workflows must NOT contain a real-looking 40-hex SHA in a `uses: tomtom215/shipreport/...@` slot", async () => {
+    // Defense in depth against the failure mode that motivated the
+    // sentinel switch: the previous placeholder was a 40-hex string
+    // that GitHub treated as a (non-existent) commit, producing a
+    // confusing "ref not found" error. Any 40-hex pin to shipreport's
+    // own reusable workflow inside examples/ would re-introduce that
+    // hazard. Outside operators are expected to substitute, but the
+    // checked-in examples themselves should stay sentinel-pinned.
+    const examples = await loadWorkflows(path.join(ROOT, "examples", "github-actions"));
+    const offenders: string[] = [];
+    for (const { file, doc } of examples) {
+      const raw = (doc as { jobs?: Record<string, { uses?: string }> }).jobs ?? {};
+      for (const [, job] of Object.entries(raw)) {
+        if (typeof job.uses !== "string") continue;
+        if (!job.uses.includes("tomtom215/shipreport/")) continue;
+        if (/@[a-f0-9]{40}\b/.test(job.uses)) {
+          offenders.push(`${path.relative(ROOT, file)}: ${job.uses}`);
+        }
+      }
+    }
+    expect(offenders.join("\n"), offenders.join("\n")).toEqual("");
   });
 });
 

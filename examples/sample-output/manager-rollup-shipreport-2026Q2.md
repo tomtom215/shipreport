@@ -9,7 +9,7 @@ One row per direct report. Use this as the backbone of your skip-level pre-read.
 | tomtom215 | 3 | 0 | 1 | 1 | 3 | 1 | 2 | [`tomtom215/shipreport#10`](https://github.com/tomtom215/shipreport/pull/10) |
 | claude-bot | 3 | 0 | 1 | 1 | 2 | 1 | 0 | [`tomtom215/shipreport#12`](https://github.com/tomtom215/shipreport/pull/12) |
 
-**Team totals:** 6 PRs · 5 reviews · 2 issues closed across 1 services.
+**Team totals:** 6 PRs · 5 reviews · 2 issues closed across 1 service.
 
 ---
 

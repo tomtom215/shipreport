@@ -96,6 +96,18 @@ describe("loadOrGenerateKey", () => {
     expect(privateKey.asymmetricKeyType).toBe("ed25519");
   });
 
+  it("auto-creates the parent directory at mode 0700 (filename privacy)", async () => {
+    // Even though the key file itself is 0600, leaving the parent
+    // directory at the default umask exposes the filename to other
+    // local users. Match the Dockerfile's chmod 0700 behaviour.
+    const keyPath = path.join(dir, "fresh-parent", "k.pem");
+    await loadOrGenerateKey(keyPath);
+    if (process.platform !== "win32") {
+      const parent = await stat(path.dirname(keyPath));
+      expect(parent.mode & 0o777).toBe(0o700);
+    }
+  });
+
   it("reuses the key on subsequent calls", async () => {
     const keyPath = path.join(dir, "k.pem");
     const first = await loadOrGenerateKey(keyPath);

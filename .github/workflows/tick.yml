@@ -189,5 +189,10 @@ jobs:
         run: node bin/shipreport.js audit tail --config shipreport.yaml --limit 20 || true
 
       - name: Verify audit chain
+        # A broken hash chain is a stop-the-scheduler event per
+        # SECURITY.md and docs/12-audit-log.md. We fail the job hard so
+        # the red status is visible in the Actions UI; a missed yellow
+        # warning would defeat the chain's purpose. The `audit verify`
+        # CLI exits 1 on any chain break (cli.ts:296) and 0 otherwise.
         if: ${{ always() && steps.detect.outputs.present == 'true' }}
-        run: node bin/shipreport.js audit verify --config shipreport.yaml || echo "::warning title=Audit chain::audit verify failed; investigate before relying on this DB for compliance."
+        run: node bin/shipreport.js audit verify --config shipreport.yaml

@@ -18,7 +18,7 @@ parts.
 
 [`docker/Dockerfile`](../docker/Dockerfile) builds a ~150 MB image:
 
-* `node:25-alpine` base, pinned by digest (Dependabot updates weekly).
+* `node:24-alpine` base, pinned by digest (Dependabot updates weekly).
 * `pnpm install --prod` only — no devDeps in the runtime layer.
 * Runs as user `shipreport` (uid `10001`), not root.
 * Two declared volumes for state + cache.

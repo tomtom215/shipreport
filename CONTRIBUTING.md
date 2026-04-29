@@ -8,13 +8,19 @@ new feature.
 ## Development setup
 
 ```bash
-pnpm install           # honors engines (Node >=22.13)
+pnpm install           # honors engines (Node >=22.13, pnpm >=10 <11)
 pnpm typecheck         # tsc --noEmit
 pnpm lint              # eslint src tests
-pnpm test              # vitest (~5s)
+pnpm test              # vitest, ~10 s on a typical laptop (306 tests today)
 pnpm test:coverage     # vitest with v8 coverage; gates on the floors in vitest.config.ts
 pnpm build             # tsc + copy templates → dist/
 ```
+
+`.nvmrc` is `24` — that's the local-development anchor and the version
+shipreport's CI matrix and Docker base track. The minimum supported Node
+is `22.13.0` (where `node:sqlite` was unflagged); the matrix exercises
+22.13, 24, and 25 on every PR. If you `nvm use` from this repo you'll
+land on 24, which is fine.
 
 CI runs the same gates plus a Node-version matrix (`22.13`, `24`, `25`),
 `pnpm audit --prod --audit-level=high`, actionlint (official binary),

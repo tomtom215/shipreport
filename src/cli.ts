@@ -77,11 +77,23 @@ const run = defineCommand({
     if (args.png) extra.push("png");
     const results: Array<{ team: string; ok: boolean; err?: string }> = [];
 
+    // `--concurrency` shares an upper bound with the YAML schema
+    // (`extract.concurrency.max(32)` in src/config.ts). The cap exists
+    // because hundreds of concurrent GraphQL queries against one token
+    // burn quota in seconds, with no realistic throughput gain past the
+    // ~4–12 sweet spot. Mirroring the cap on the CLI override stops an
+    // operator from accidentally bypassing it via the flag.
+    const CONCURRENCY_MAX = 32;
     const concurrencyOverride = args.concurrency
       ? (() => {
           const n = Number(args.concurrency);
           if (!Number.isFinite(n) || n < 1) {
             throw new Error(`--concurrency must be a positive integer (got ${args.concurrency})`);
+          }
+          if (n > CONCURRENCY_MAX) {
+            throw new Error(
+              `--concurrency must be <= ${CONCURRENCY_MAX} (got ${args.concurrency}); see docs/06-config.md`,
+            );
           }
           return Math.floor(n);
         })()
@@ -443,6 +455,7 @@ const doctor = defineCommand({
     if (cfg.audit.enabled) console.log(`State path:       ${resolveHome(cfg.audit.path)}`);
     console.log(`Teams:            ${cfg.teams.map((t) => t.name).join(", ")}`);
     const scheduled = cfg.teams.filter((t) => t.schedule);
+    let cronInvalid = false;
     if (scheduled.length > 0) {
       console.log(`Scheduled teams:`);
       for (const t of scheduled) {
@@ -450,7 +463,14 @@ const doctor = defineCommand({
           parseCron(t.schedule!);
           console.log(`  ${t.name}: ${t.schedule}`);
         } catch (err) {
+          // Invalid cron is a CI-blocker per docs/07-scheduling.md: doctor
+          // is the documented preflight; failing the exit code is what
+          // makes the preflight actually preflighty. We continue printing
+          // the rest of the output so the operator gets the full picture
+          // (auth, paths, every team's status), then exit non-zero at the
+          // end of the run.
           console.log(`  ${t.name}: ${t.schedule}  — INVALID: ${(err as Error).message}`);
+          cronInvalid = true;
         }
       }
     }
@@ -466,6 +486,12 @@ const doctor = defineCommand({
         console.log(`Puppeteer:        MISSING — install with \`pnpm add puppeteer\``);
       }
     }
+
+    // Exit-2 is the documented "operator should fix the config before
+    // running this in production" code (matches the audit-disabled exit
+    // path in this same file). Non-zero is what lets a CI step block on
+    // a bad cron, which is the contract docs/07 promises.
+    if (cronInvalid) process.exit(2);
   },
 });
 

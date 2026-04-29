@@ -10,7 +10,7 @@ One row per direct report. Use this as the backbone of your skip-level pre-read.
 | <%= m.displayName %> | <%= m.prsMerged %> | <%= m.prsByKind.feature %> | <%= m.prsByKind.bugfix %> | <%= m.prsByKind.refactor %> | <%= m.reviewsGiven %> | <%= m.crossRepoCollaboration %> | <%= m.linkedIssuesClosed.length %> | <%= m.topPRs.length > 0 ? `[\`${m.topPRs[0].repo}#${m.topPRs[0].number}\`](${m.topPRs[0].url})` : "—" %> |
 <% }); -%>
 
-**Team totals:** <%= it.team.totals.prsMerged %> PRs · <%= it.team.totals.reviewsGiven %> reviews · <%= it.team.totals.issuesClosed %> issues closed across <%= it.team.totals.reposTouched %> services.
+**Team totals:** <%= it.team.totals.prsMerged %> <%= it.fmt.plural(it.team.totals.prsMerged, "PR") %> · <%= it.team.totals.reviewsGiven %> <%= it.fmt.plural(it.team.totals.reviewsGiven, "review") %> · <%= it.team.totals.issuesClosed %> <%= it.fmt.plural(it.team.totals.issuesClosed, "issue") %> closed across <%= it.team.totals.reposTouched %> <%= it.fmt.plural(it.team.totals.reposTouched, "service") %>.
 <% if (it.team.dataGaps.length > 0) { %>
 
 ## Data gaps

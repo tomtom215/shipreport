@@ -216,6 +216,61 @@ describe("cli: run", () => {
       await ws.cleanup();
     }
   });
+
+  it("rejects --concurrency above the cap (mirrors the YAML schema's max=32)", async () => {
+    const ws = await makeWorkspace();
+    try {
+      await warmCache(ws.dir);
+      await expect(
+        __testables.run.run!({
+          args: {
+            config: ws.configPath,
+            team: "t",
+            all: false,
+            verbose: false,
+            dryRun: true,
+            concurrency: "33",
+            pdf: false,
+            png: false,
+          },
+        } as never),
+      ).rejects.toThrow(/--concurrency must be <= 32/);
+    } finally {
+      await ws.cleanup();
+    }
+  });
+
+  it("accepts --concurrency at the cap boundary (32)", async () => {
+    const ws = await makeWorkspace();
+    try {
+      await warmCache(ws.dir);
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const e = exitSpy();
+      try {
+        await __testables.run.run!({
+          args: {
+            config: ws.configPath,
+            team: "t",
+            all: false,
+            verbose: false,
+            dryRun: true,
+            concurrency: "32",
+            pdf: false,
+            png: false,
+          },
+        } as never).catch((err: Error) => {
+          if (!err.message.startsWith("__exit:")) throw err;
+        });
+        // No process.exit should have been called for a successful dry-run.
+        expect(e.calls).toEqual([]);
+      } finally {
+        log.mockRestore();
+        e.restore();
+      }
+    } finally {
+      await ws.cleanup();
+    }
+  });
 });
 
 describe("cli: doctor --offline", () => {
@@ -237,6 +292,71 @@ describe("cli: doctor --offline", () => {
       expect(joined).toMatch(/Auth kind:.*offline/);
       expect(joined).toContain("Teams:");
       expect(joined).toContain("Scheduled teams:");
+    } finally {
+      await ws.cleanup();
+    }
+  });
+
+  it("exits 2 when any team's cron is invalid (CI gate per docs/07-scheduling.md)", async () => {
+    const ws = await makeWorkspace();
+    try {
+      // Replace the workspace's config with one that has a malformed
+      // cron field. parseCron rejects named days (`MON`/`TUE`) and any
+      // 6-field "with seconds" form — we use the named-day form here.
+      const yaml = [
+        "github: { tokenEnv: X }",
+        "org: o",
+        "teams:",
+        "  - name: t",
+        "    manager: a",
+        "    members: [a]",
+        "    repos: [o/r]",
+        "    schedule: '0 14 1 1,4,7,10 MON'",
+        "defaults: { quarter: 2026Q2, timezone: UTC }",
+        "audit: { enabled: false }",
+        "",
+      ].join("\n");
+      await writeFile(ws.configPath, yaml, "utf8");
+      const out: string[] = [];
+      const log = vi.spyOn(console, "log").mockImplementation((m) => {
+        out.push(String(m));
+      });
+      const e = exitSpy();
+      try {
+        await expect(
+          __testables.doctor.run!({
+            args: { config: ws.configPath, offline: true },
+          } as never),
+        ).rejects.toThrow(/__exit:2/);
+        // The diagnostic line is still printed for the operator.
+        expect(out.join("\n")).toMatch(/INVALID:/);
+        expect(e.calls).toContain(2);
+      } finally {
+        log.mockRestore();
+        e.restore();
+      }
+    } finally {
+      await ws.cleanup();
+    }
+  });
+
+  it("exits 0 when all crons are valid (negative control)", async () => {
+    const ws = await makeWorkspace();
+    try {
+      // Default workspace cron `0 9 * * 1` is valid; doctor should
+      // complete without calling process.exit.
+      const e = exitSpy();
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      try {
+        await __testables.doctor.run!({
+          args: { config: ws.configPath, offline: true },
+        } as never);
+        // No exit call means no rejection above; assert calls is empty.
+        expect(e.calls).toEqual([]);
+      } finally {
+        log.mockRestore();
+        e.restore();
+      }
     } finally {
       await ws.cleanup();
     }

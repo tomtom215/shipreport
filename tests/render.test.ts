@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  fmt,
   mdToHtml,
   readPackageVersion,
   resolveTemplateDir,
@@ -94,5 +95,56 @@ describe("resolveTemplateDir", () => {
 
   it("throws when given an empty candidate list", () => {
     expect(() => resolveTemplateDir([])).toThrow(/no candidates supplied/);
+  });
+});
+
+describe("fmt.plural", () => {
+  it("returns the singular form for n === 1 (default plural is `${singular}s`)", () => {
+    expect(fmt.plural(1, "PR")).toBe("PR");
+    expect(fmt.plural(1, "review")).toBe("review");
+    expect(fmt.plural(1, "service")).toBe("service");
+  });
+
+  it("returns the default plural form for n !== 1", () => {
+    expect(fmt.plural(0, "PR")).toBe("PRs");
+    expect(fmt.plural(2, "PR")).toBe("PRs");
+    expect(fmt.plural(99, "review")).toBe("reviews");
+  });
+
+  it("uses the custom plural when given (irregular forms like fix→fixes)", () => {
+    expect(fmt.plural(1, "fix", "fixes")).toBe("fix");
+    expect(fmt.plural(0, "fix", "fixes")).toBe("fixes");
+    expect(fmt.plural(7, "fix", "fixes")).toBe("fixes");
+  });
+
+  it("treats fractional credit (split co-author mode) as plural — 0.5 PRs, 1.5 PRs", () => {
+    expect(fmt.plural(0.5, "PR")).toBe("PRs");
+    expect(fmt.plural(1.5, "PR")).toBe("PRs");
+    // The exact 1.0 still takes singular, even when arrived at via float.
+    expect(fmt.plural(1.0, "PR")).toBe("PR");
+  });
+});
+
+describe("fmt.date", () => {
+  it("returns the date portion of an ISO timestamp", () => {
+    expect(fmt.date("2026-04-15T12:34:56Z")).toBe("2026-04-15");
+  });
+
+  it("returns the em-dash sentinel for an empty input", () => {
+    expect(fmt.date("")).toBe("—");
+  });
+});
+
+describe("fmt.firstParagraph", () => {
+  it("returns the first paragraph stripped of heading/quote markers", () => {
+    expect(fmt.firstParagraph("# A heading\n\nSecond paragraph"))
+      .toBe("A heading");
+    expect(fmt.firstParagraph("> a quoted line\n> second\n\nbody"))
+      .toBe("a quoted line\nsecond");
+  });
+
+  it("returns empty string for empty / whitespace-only input", () => {
+    expect(fmt.firstParagraph("")).toBe("");
+    expect(fmt.firstParagraph("   \n  \n")).toBe("");
   });
 });

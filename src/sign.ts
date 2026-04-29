@@ -21,7 +21,7 @@ import {
   verify as cryptoVerify,
   type KeyObject,
 } from "node:crypto";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import path from "node:path";
 import { canonicalize } from "./audit.js";
 
@@ -111,7 +111,22 @@ export async function loadOrGenerateKey(keyPath: string): Promise<{
     if (e?.code !== "ENOENT") throw err;
   }
   const { privateKeyPem, publicKeyPem } = generateEd25519KeyPair();
-  await mkdir(path.dirname(keyPath), { recursive: true });
+  // Tighten the parent directory mode to 0700 for the same reason the
+  // key itself is 0600: even on a multi-user host the filename should
+  // not leak. A pre-existing wider directory is left as-is (mkdir's
+  // `mode` only applies to directories it actually creates) — the
+  // Dockerfile already chmod 0700s the path, and operators can do the
+  // same. The umask wrap is a belt-and-suspenders chmod for the case
+  // where the directory was just created by mkdir(recursive) and an
+  // overly permissive umask widened the mode anyway.
+  const dir = path.dirname(keyPath);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  try {
+    await chmod(dir, 0o700);
+  } catch {
+    /* mkdir-recursive on a deeper tree may have created intermediate
+       parents we shouldn't touch; ignore if the leaf is read-only */
+  }
   await writeFile(keyPath, privateKeyPem, { mode: 0o600 });
   return {
     privateKey: loadPrivateKeyFromPem(privateKeyPem),

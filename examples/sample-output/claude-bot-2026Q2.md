@@ -9,7 +9,7 @@ Delivered 3 merged PRs across 1 repo.
 ## Quantified impact
 
 - **3** pull requests merged
-  (0 features, 1 fixes, 1 refactors, 1 infra, 0 docs, 0 other)
+  (0 features, 1 fix, 1 refactor, 1 infra, 0 docs, 0 other)
 - **21** files touched across **1** service
 - **2** code reviews given on teammates' PRs
 - **0** issues closed via linked PRs
@@ -43,7 +43,7 @@ Provided 2 code reviews on teammates' pull requests.
 
 ## Suggested talking points
 
-- Reliability-focused quarter (1 fixes) — pair each fix with the incident or metric it improved.
+- Reliability-focused quarter (1 fix) — pair each fix with the incident or metric it improved.
 
 ---
 

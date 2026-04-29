@@ -43,7 +43,13 @@ export interface RenderContext {
   generatedAt: string;
 }
 
-const fmt = {
+/**
+ * Template-side formatting helpers. Exported so that templates have one
+ * canonical place to do per-value coercions (date trimming, pluralization,
+ * first-paragraph extraction) — and so unit tests can lock the behaviour
+ * down without spinning up Eta.
+ */
+export const fmt = {
   date(iso: string): string {
     if (!iso) return "—";
     return iso.slice(0, 10);
@@ -58,6 +64,21 @@ const fmt = {
     // reads as prose. Issue-link trailers like "Fixes #123" are usually
     // in their own paragraph and never reach here.
     return first.replace(/^#+\s*/, "").replace(/^\s*>\s?/gm, "");
+  },
+  /**
+   * Pick singular vs plural form based on `n`. Templates were carrying
+   * inline ternaries on `n === 1` for a few words ("service"/"services")
+   * and not for others ("PRs"/"reviews"/"issues"), producing user-visible
+   * "1 services" output in `manager-rollup.md.eta`. Centralising the
+   * logic here keeps every template consistent.
+   *
+   * `n` is a real number (co-author credit can be fractional under the
+   * `split` mode), so the threshold is "exactly 1.0" — `0.5` and `1.5`
+   * both take the plural form, which matches English usage ("0.5 PRs",
+   * "1.5 PRs").
+   */
+  plural(n: number, singular: string, plural?: string): string {
+    return n === 1 ? singular : (plural ?? `${singular}s`);
   },
 };
 

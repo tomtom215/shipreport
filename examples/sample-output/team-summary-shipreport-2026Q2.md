@@ -13,13 +13,13 @@
 
 ### tomtom215
 
-- 3 PRs merged (0 features, 1 fixes), 3 reviews given
+- 3 PRs merged (0 features, 1 fix), 3 reviews given
 - Top PR: [feat(extract): timezone-aware quarter boundaries](https://github.com/tomtom215/shipreport/pull/10) (`tomtom215/shipreport#10`)
 - Milestones: v0.3 release quality
 
 ### claude-bot
 
-- 3 PRs merged (0 features, 1 fixes), 2 reviews given
+- 3 PRs merged (0 features, 1 fix), 2 reviews given
 - Top PR: [refactor(extract): concurrency pool + incremental cache](https://github.com/tomtom215/shipreport/pull/12) (`tomtom215/shipreport#12`)
 
 ---

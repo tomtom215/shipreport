@@ -70,7 +70,7 @@ The Zod-issued errors are precise. Selected examples:
 | `teams: Array must contain at least 1 element(s)`                  | Empty `teams:` list.                                                  |
 | `teams.0.repos.0: Invalid input: must match pattern …`             | A repo isn't `owner/repo` shape.                                      |
 | `defaults.timezone: Required`                                      | Both team `quarter:` and `defaults.quarter:` missing.                 |
-| `audit.path: Required`                                             | Audit enabled but no path set (default should fill this — re-check the YAML for typos). |
+| `quarter date range: \`from\` must be on or before \`to\``         | An explicit `{ from, to }` range with `from` strictly after `to`. Reverse the bounds. |
 
 Run `node scripts/validate-config.mjs shipreport.yaml` for the full set
 without spending API quota.

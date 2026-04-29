@@ -59,4 +59,19 @@ describe("version is sourced from package.json everywhere", () => {
     await writeFile(wrongType, JSON.stringify({ version: 42 }));
     expect(() => readVersionSync(wrongType)).toThrow(/no usable "version" field/);
   });
+
+  it("token-source's app installation discovery imports USER_AGENT (no hardcoded UA)", async () => {
+    // Source-level guard: the App-installation lookup `fetch` must use
+    // the version.ts USER_AGENT constant. A literal string here would
+    // silently drift from --version output on the next release bump.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = await readFile(
+      path.join(here, "..", "src", "token-source.ts"),
+      "utf8",
+    );
+    expect(src).toContain('import { USER_AGENT } from "./version.js"');
+    expect(src).toContain('"user-agent": USER_AGENT');
+    // And there must be no remaining literal "shipreport"-only UA.
+    expect(src).not.toMatch(/"user-agent":\s*"shipreport"\s*,/);
+  });
 });

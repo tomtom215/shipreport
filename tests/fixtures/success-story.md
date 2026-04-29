@@ -9,7 +9,7 @@ Shipped 1 milestone across 2 services.
 ## Quantified impact
 
 - **7** pull requests merged
-  (3 features, 2 fixes, 1 refactors, 1 infra, 0 docs, 0 other)
+  (3 features, 2 fixes, 1 refactor, 1 infra, 0 docs, 0 other)
 - **84** files touched across **2** services
 - **19** code reviews given on teammates' PRs
 - **2** issues closed via linked PRs

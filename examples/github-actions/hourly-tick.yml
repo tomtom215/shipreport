@@ -1,17 +1,25 @@
 # Example caller workflow — hourly cron, dispatching to per-team schedules.
 #
 # ┌──────────────────────────────────────────────────────────────────┐
-# │  REPLACE THIS PIN BEFORE COPYING TO YOUR REPO                    │
-# │  Both the `uses:` ref and the `shipreport_ref:` input must be    │
-# │  set to a SHA (40-hex) or a release tag (e.g. v0.2.0). The       │
-# │  values below are placeholder SHAs from this branch.             │
-# │  Do NOT ship `@main` to production — see docs/14-security.md.    │
+# │  REQUIRED REPLACEMENTS                                           │
+# │  Every `REPLACE_WITH_TAG_OR_SHA` token below MUST be replaced     │
+# │  before this workflow is committed. They are NOT real refs;      │
+# │  GitHub will reject the workflow on the first run if you leave    │
+# │  them in. Use a release tag (e.g. `v0.2.0`) or a 40-hex commit   │
+# │  SHA. Latest tags:                                                │
+# │     https://github.com/tomtom215/shipreport/releases             │
+# │  Both the `uses:` ref AND the `shipreport_ref:` input must be set │
+# │  to the same value. Do NOT ship `@main` to production — see      │
+# │  docs/14-security.md.                                            │
 # └──────────────────────────────────────────────────────────────────┘
 #
 # This is the recommended pattern when you have multiple teams with different
 # cadences (e.g. checkout team quarterly, platform team weekly). The hourly
 # cron is cheap; `shipreport schedule tick` reads each team's per-team cron
 # from shipreport.yaml and only runs the teams whose schedule has come due.
+# It is also the delay-resistant pattern: GitHub's scheduler can drop any
+# individual cron trigger, and the per-team scan window picks up the missed
+# minute on the next hourly tick.
 #
 # Required:
 #   * `shipreport.yaml` at the repo root, with `schedule: "<cron>"` on each
@@ -31,12 +39,12 @@ permissions:
 jobs:
   tick:
     # REPLACE: pin to the latest release tag or commit SHA.
-    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@0954c506f33472309b50bda30a48ba42a2288f12
+    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@REPLACE_WITH_TAG_OR_SHA
     with:
       config: shipreport.yaml
       mode: tick
       # REPLACE: same pin as the `uses:` ref above.
-      shipreport_ref: 0954c506f33472309b50bda30a48ba42a2288f12
+      shipreport_ref: REPLACE_WITH_TAG_OR_SHA
     secrets:
       shipreport_token: ${{ secrets.SHIPREPORT_TOKEN }}
       shipreport_app_private_key: ${{ secrets.SHIPREPORT_APP_PRIVATE_KEY }}

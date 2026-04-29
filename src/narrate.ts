@@ -55,11 +55,11 @@ export function talkingPoints(d: DevQuarter): string[] {
     );
   } else if (dominant === "bugfix") {
     out.push(
-      `Reliability-focused quarter (${d.prsByKind.bugfix} fixes) — pair each fix with the incident or metric it improved.`,
+      `Reliability-focused quarter (${d.prsByKind.bugfix} ${pluralForm(d.prsByKind.bugfix, "fix", "fixes")}) — pair each fix with the incident or metric it improved.`,
     );
   } else if (dominant === "refactor") {
     out.push(
-      `Investment quarter (${d.prsByKind.refactor} refactors) — quantify the debt paid down (build-time, test-time, incidents avoided).`,
+      `Investment quarter (${d.prsByKind.refactor} ${pluralForm(d.prsByKind.refactor, "refactor")}) — quantify the debt paid down (build-time, test-time, incidents avoided).`,
     );
   } else if (dominant === "infra") {
     out.push(
@@ -69,12 +69,12 @@ export function talkingPoints(d: DevQuarter): string[] {
 
   if (d.reviewsGiven >= 15) {
     out.push(
-      `Strong review leadership (${d.reviewsGiven} reviews given) — name the teammates they mentored.`,
+      `Strong review leadership (${d.reviewsGiven} ${pluralForm(d.reviewsGiven, "review")} given) — name the teammates they mentored.`,
     );
   }
   if (d.crossRepoCollaboration >= 3) {
     out.push(
-      `Touched ${d.crossRepoCollaboration} services — call out any cross-team coordination they drove.`,
+      `Touched ${d.crossRepoCollaboration} ${pluralForm(d.crossRepoCollaboration, "service")} — call out any cross-team coordination they drove.`,
     );
   }
   if (d.shippedMilestones.length > 0) {
@@ -113,6 +113,16 @@ function dominantKind(kinds: Record<PRKind, number>): PRKind {
 
 function plural(n: number): string {
   return n === 1 ? "" : "s";
+}
+
+/**
+ * Singular vs plural noun selector. Mirrors `fmt.plural` in render.ts but
+ * lives here so narrate.ts has no dependency on render.ts (keeps the
+ * narrate module pure for transform-time use). The two helpers must stay
+ * behaviourally identical — see tests/narrate.test.ts for the contract.
+ */
+function pluralForm(n: number, singular: string, pluralForm?: string): string {
+  return n === 1 ? singular : (pluralForm ?? `${singular}s`);
 }
 
 function capitalize(s: string): string {

@@ -21,8 +21,9 @@ out/
 └── manager-rollup-checkout-2026Q1.md     # one-page calibration pre-read
 ```
 
-PDF and PNG outputs are opt-in (require `puppeteer`, ~400 MB). See
-[06 · Configuration reference](./06-config.md).
+PDF and PNG outputs are opt-in: `puppeteer` is **not** in shipreport's
+default install — operators who need them run `pnpm add puppeteer`
+(~400 MB Chromium). See [06 · Configuration reference](./06-config.md).
 
 ## What it counts
 

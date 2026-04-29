@@ -235,3 +235,51 @@ describe("AuditLog row validators (parseRawRow / expectString / expectInt)", () 
     expect(row2.target).toBe("acme/team");
   });
 });
+
+describe("StateDB.open file mode (defense in depth)", () => {
+  it("creates the state.sqlite file at mode 0600 (POSIX)", async () => {
+    if (process.platform === "win32") return;
+    const { stat } = await import("node:fs/promises");
+    const dbPath = await tmp();
+    const state = await StateDB.open(dbPath);
+    try {
+      const s = await stat(dbPath);
+      expect(s.mode & 0o777).toBe(0o600);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("tightens existing -wal and -shm sibling files to 0600 (POSIX)", async () => {
+    // node:sqlite's WAL mode creates `<db>-wal` and `<db>-shm` files on
+    // first write. Append a row to force their creation, then re-open
+    // to exercise the chmod loop on existing siblings.
+    if (process.platform === "win32") return;
+    const { stat } = await import("node:fs/promises");
+    const dbPath = await tmp();
+    const state1 = await StateDB.open(dbPath);
+    new AuditLog(state1).append({
+      actor: "x",
+      event: "run_started",
+      target: "t",
+    });
+    state1.close();
+    const state2 = await StateDB.open(dbPath);
+    try {
+      // -wal may have been merged on close; if it exists, it's 0600.
+      // -shm is created on every open.
+      for (const sib of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+        const exists = await stat(sib).then(
+          () => true,
+          () => false,
+        );
+        if (exists) {
+          const s = await stat(sib);
+          expect(s.mode & 0o777).toBe(0o600);
+        }
+      }
+    } finally {
+      state2.close();
+    }
+  });
+});

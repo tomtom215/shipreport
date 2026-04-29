@@ -58,7 +58,7 @@ Output:
 Auth kind:        pat
 Identity:         pat:env:SHIPREPORT_GITHUB_TOKEN
 Authenticated as: jdoe
-Token scopes:     contents:read, issues:read, pull_requests:read, metadata:read
+Token scopes:     (fine-grained PAT or App installation)
 GHES version:     github.com
 Base URL:         https://api.github.com
 Cache path:       /home/runner/.cache/shipreport/cache.sqlite
@@ -69,6 +69,12 @@ Scheduled teams:
   checkout: 0 14 1 1,4,7,10 *
   platform: 0 9 * * 1
 ```
+
+(The `Token scopes:` line varies by auth type — classic PATs return a
+comma-separated list like `repo, read:org`; fine-grained PATs and App
+installation tokens trigger the parenthetical fallback shown above. See
+[02 · Quickstart, Step 5](./02-quickstart.md#step-5--smoke-test-with-doctor-mode)
+for the canonical reference.)
 
 What it catches:
 

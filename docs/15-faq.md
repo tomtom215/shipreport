@@ -113,8 +113,11 @@ No.
 ## How do I contribute?
 
 PRs welcome. Run `pnpm install && pnpm test:coverage && pnpm lint &&
-pnpm typecheck` locally before opening one. The CI gate is 90% coverage
-for `src/`. New `defaults.*` fields need a Zod default and a unit test.
+pnpm typecheck` locally before opening one. The coverage gates are in
+`vitest.config.ts` (95% lines / 95% functions / 85% branches /
+95% statements globally; 100% per-file on the SOC2 paths —
+`src/audit.ts`, `src/audit-export.ts`, `src/sign.ts`, `src/state.ts`).
+New `defaults.*` fields need a Zod default and a unit test.
 
 ## Where do I file a bug?
 

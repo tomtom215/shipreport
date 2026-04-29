@@ -14,6 +14,7 @@
 import { createAppAuth } from "@octokit/auth-app";
 import type { Config } from "./config.js";
 import { readFile } from "node:fs/promises";
+import { USER_AGENT } from "./version.js";
 
 export type AuthKind = "pat" | "app";
 
@@ -179,7 +180,10 @@ async function resolveInstallationId(
     headers: {
       authorization: `Bearer ${appJwt.token}`,
       accept: "application/vnd.github+json",
-      "user-agent": "shipreport",
+      // Same UA as the rest of shipreport. Sourced from src/version.ts so
+      // a release bump propagates to every outbound request — no string
+      // duplication. tests/version.test.ts asserts the link.
+      "user-agent": USER_AGENT,
     },
   });
   if (!res.ok) {
