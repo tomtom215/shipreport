@@ -6,6 +6,43 @@ All notable changes are recorded here. Format: [Keep a Changelog
 
 ## [Unreleased]
 
+### Pass 9 — delivery to non-technical managers
+
+Closed the last-mile gap for an operator whose end audience (the
+manager being calibrated) doesn't use GitHub and won't open a
+terminal. shipreport still produces files; this pass makes "files →
+manager's inbox" a documented, scripted, air-gappable path.
+
+- **`docs/16-delivery.md`** — new operator manual page covering seven
+  delivery patterns (email-as-PDF-attachment, email-as-HTML-inline,
+  shared drive / SharePoint / Google Drive, internal static-site host,
+  Slack / Teams / Mattermost, calendar-invite-with-PDF, print-and-walk),
+  each with copy-paste recipes. Notes which patterns work air-gapped
+  (almost all of them — the constraint is your internal SMTP / file
+  share / chat being reachable).
+- **`scripts/email-report.sh`** — copy-paste-ready helper that emails
+  a single rendered file (or per-team auto-dispatched files via a
+  sidecar `managers.yaml` mapping). Auto-detects whichever local mail
+  transport is available (`msmtp` / `sendmail` / `mail` / `mailx`),
+  builds the MIME message, and sends. `--dry-run` shows what would go
+  out without sending. `--inline` sends rendered HTML in the body
+  instead of as an attachment.
+- **HANDOFF.md** has a new "Step 8 — Get the report to the manager"
+  section that walks the simplest path (single recipient + the
+  email-report helper) and points at `docs/16-delivery.md` for any
+  other channel.
+- **`docs/15-faq.md`** clarifies there is no upstream issue tracker
+  and adds a "Will the original maintainer help?" answer (no — clean
+  one-way handover).
+- **`tests/e2e/docs-index.test.ts`** + **`docs/README.md`** + README
+  page-count update — page 16 is now part of the index test, and the
+  README correctly reports 17 numbered pages.
+
+Verification: `pnpm typecheck`, `pnpm lint`, `pnpm test`
+(31 files / 331 tests) all clean. `email-report.sh --dry-run`
+smoke-tested across single-recipient and `--pattern` + `--managers`
+flows.
+
 ### Pass 8 — clean-handover preparation
 
 Prepares the repo for delivery as a static archive (ZIP / tarball) to a

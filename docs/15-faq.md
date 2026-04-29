@@ -1,9 +1,10 @@
 # 15 · FAQ
 
-← [14 · Security](./14-security.md) · [Index](./README.md)
+← [14 · Security](./14-security.md) · [Index](./README.md) · Next → [16 · Delivery](./16-delivery.md)
 
-Quick answers. If yours isn't here, file an issue with the
-`docs-question` label.
+Quick answers. If yours isn't here, the rest of the docs and the
+inline source comments are your reference — there's no upstream issue
+tracker to file against.
 
 ## How long does a quarterly run take?
 
@@ -121,11 +122,26 @@ New `defaults.*` fields need a Zod default and a unit test.
 
 ## Where do I file a bug?
 
-`https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/issues`. Include:
+This codebase was delivered as a static archive — there is no upstream
+issue tracker. If you push it to your own GitHub repository, file
+internal issues there. Otherwise, log bugs in whatever ticketing
+system your team owns.
 
-* `shipreport doctor` output (redact tokens — there shouldn't be any in
-  the output, but double-check).
+When investigating an issue, capture:
+
+* `shipreport doctor` output (redact tokens — there shouldn't be any
+  in the output, but double-check).
 * The exact CLI invocation that failed.
 * The relevant section of `shipreport audit tail --json --limit 10`.
+* Node + pnpm versions (`node --version`, `pnpm --version`).
+* `node scripts/preflight.mjs` output if the install itself looks off.
 
-That's enough for almost any reproduction.
+That's enough context for almost any reproduction.
+
+## Will the original maintainer help?
+
+No. This is a clean one-way handover: code only, no support, no
+back-channel. You own this code now. The good news is that everything
+is here — `docs/13-troubleshooting.md` covers every error message
+shipreport emits, and the test suite (300+ tests) is exhaustive enough
+to use as living documentation.

@@ -50,6 +50,7 @@ GHA's artifact retention by default.
 | 13  | [Troubleshooting](./13-troubleshooting.md)                 | Every error message, with root cause and fix.                   |
 | 14  | [Security model](./14-security.md)                         | Threat model, secret handling, supply chain.                    |
 | 15  | [FAQ](./15-faq.md)                                         | Quick answers to the questions everyone asks.                   |
+| 16  | [Delivery](./16-delivery.md)                               | Getting reports to non-technical managers (email, shared drive, intranet, …). |
 
 ## How to read this
 
@@ -61,6 +62,8 @@ GHA's artifact retention by default.
   references; the rest is for changes.
 * **You're a security reviewer**: 14 → 12 → 06 will give you the model in
   the right order.
+* **Your manager doesn't use GitHub**: 16 covers every realistic
+  delivery channel — email, shared drive, intranet, calendar invites.
 
 Every page links forward, backward, and to the relevant CLI / workflow
 files. Nothing here is duplicated from `README.md` — that's the project

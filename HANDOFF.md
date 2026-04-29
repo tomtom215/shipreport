@@ -268,6 +268,54 @@ runs are 10× faster than the first.
 
 ---
 
+## Step 8 — Get the report to the manager
+
+shipreport **produces files**; it does not deliver them. After a run,
+`out/` contains:
+
+```
+out/
+├── alice-2026Q1.md / .html               # one per dev (1:1 self-review)
+├── team-summary-checkout-2026Q1.{md,html}
+└── manager-rollup-checkout-2026Q1.{md,html}    # ← what the manager wants
+```
+
+For a non-technical manager who **doesn't use GitHub** and won't open
+a terminal, the standard flow is: email them the
+`manager-rollup-<team>-<quarter>.pdf` (or `.html`) file. shipreport
+ships a copy-paste-ready helper for this:
+
+```bash
+# After a successful run — single recipient:
+bash scripts/email-report.sh \
+  --to manager@your-corp.example \
+  --subject "Q1 2026 calibration pre-read — checkout team" \
+  --file out/manager-rollup-checkout-2026Q1.pdf
+
+# Or per-team dispatch from a YAML mapping you maintain:
+cat > managers.yaml <<'EOF'
+checkout: manager-checkout@your-corp.example
+platform: manager-platform@your-corp.example
+EOF
+bash scripts/email-report.sh \
+  --pattern 'out/manager-rollup-*.pdf' \
+  --managers managers.yaml \
+  --subject "Q1 2026 calibration pre-read"
+```
+
+The script auto-detects whichever local mail transport you have
+(`msmtp`, `sendmail`, `mail`, `mailx`) and sends through it. Air-
+gapped? Point your transport at your **internal** SMTP relay — no
+public Internet egress needed.
+
+For organisations that prefer a different channel — shared drive,
+SharePoint, intranet HTTP, Slack/Teams, calendar invite with PDF
+attachment — see [`docs/16-delivery.md`](./docs/16-delivery.md). It
+covers seven realistic patterns, each with a copy-paste recipe, and
+notes which work air-gapped (almost all of them).
+
+---
+
 ## How to operate it day-to-day
 
 Pick the deployment shape that matches your environment. All three are

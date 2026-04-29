@@ -29,12 +29,13 @@ github.com and GitHub Enterprise Server. Fine-grained PATs and GitHub App
 installation tokens both supported. No data leaves your network unless you
 choose to ship the audit log somewhere.
 
-**End-user docs**: see [`docs/`](./docs/) — 16 numbered pages (00
-Overview through 15 FAQ) plus an index, covering prerequisites, all
-three auth flows (PAT / App / GHES), every supported deployment
-pattern, dry-run methodology, the audit-log model, and troubleshooting.
-Start at [`docs/02-quickstart.md`](./docs/02-quickstart.md) for a
-10-minute go-live.
+**End-user docs**: see [`docs/`](./docs/) — 17 numbered pages (00
+Overview through 16 Delivery) plus an index, covering prerequisites,
+all three auth flows (PAT / App / GHES), every supported deployment
+pattern, dry-run methodology, the audit-log model, troubleshooting,
+and how to get reports into a non-technical manager's inbox. Start at
+[`docs/02-quickstart.md`](./docs/02-quickstart.md) for a 10-minute
+go-live.
 
 ---
 
