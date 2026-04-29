@@ -10,7 +10,7 @@
 # │  will reject the workflow on the first run if you leave it in.   │
 # │  Use a release tag (e.g. `v0.2.0`) or a 40-hex commit SHA.       │
 # │  Latest tags:                                                     │
-# │     https://github.com/tomtom215/shipreport/releases             │
+# │     https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/releases             │
 # │  Do NOT ship `@main` to production — see docs/14-security.md.    │
 # └──────────────────────────────────────────────────────────────────┘
 #
@@ -43,7 +43,7 @@ jobs:
       - name: Check out shipreport source (for the validator)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          repository: tomtom215/shipreport
+          repository: YOUR-GITHUB-OWNER/YOUR-FORK
           # REPLACE: pin to the latest release tag or commit SHA.
           ref: REPLACE_WITH_TAG_OR_SHA
           path: shipreport

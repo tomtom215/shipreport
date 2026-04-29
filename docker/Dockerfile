@@ -74,9 +74,13 @@ ENV HOME=/home/shipreport
 VOLUME ["/home/shipreport/.local/share/shipreport", "/home/shipreport/.cache/shipreport"]
 
 # OCI image labels — make `docker inspect` informative for compliance.
+# `org.opencontainers.image.source` is intentionally left as a generic
+# placeholder; if you fork this code into your own GitHub repository,
+# replace the URL with your fork (or pass it as a build arg) so SBOM
+# tooling can resolve provenance back to your source.
 LABEL org.opencontainers.image.title="shipreport" \
       org.opencontainers.image.description="Quarterly engineering success story generator." \
-      org.opencontainers.image.source="https://github.com/tomtom215/shipreport" \
+      org.opencontainers.image.source="https://example.com/REPLACE_WITH_YOUR_REPO_URL" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["node", "bin/shipreport.js"]

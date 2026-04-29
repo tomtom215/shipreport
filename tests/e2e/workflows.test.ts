@@ -101,7 +101,13 @@ describe("GitHub Actions workflow structure", () => {
     // sentinel, which the next test below verifies independently.
     const examples = await loadWorkflows(path.join(ROOT, "examples", "github-actions"));
     const SHA40_PIN = /^[\w./-]+@[a-f0-9]{40}(\s+#\s*v[\w.-]+)?$/;
-    const SHIPREPORT_REUSABLE = /^tomtom215\/shipreport\/.+@/;
+    // Caller workflows that reference the shipreport reusable workflow
+    // by path are exempt from the SHA-pinning rule because they use the
+    // REPLACE_WITH_TAG_OR_SHA sentinel (verified by the next test). The
+    // pattern here is org-agnostic — the recipient of this code is
+    // expected to fork it under their own GitHub owner, so a hard-coded
+    // owner here would break their CI after the rename.
+    const SHIPREPORT_REUSABLE = /\/\.github\/workflows\/reusable-shipreport\.yml@/;
     const offenders: string[] = [];
     for (const { file, doc } of examples) {
       for (const [name, job] of Object.entries(doc.jobs ?? {})) {
@@ -146,21 +152,23 @@ describe("GitHub Actions workflow structure", () => {
     expect(matched).toBeGreaterThanOrEqual(4);
   });
 
-  it("examples/github-actions caller workflows must NOT contain a real-looking 40-hex SHA in a `uses: tomtom215/shipreport/...@` slot", async () => {
+  it("examples/github-actions caller workflows must NOT contain a real-looking 40-hex SHA in a `uses: <owner>/<repo>/.github/workflows/reusable-shipreport.yml@` slot", async () => {
     // Defense in depth against the failure mode that motivated the
     // sentinel switch: the previous placeholder was a 40-hex string
     // that GitHub treated as a (non-existent) commit, producing a
-    // confusing "ref not found" error. Any 40-hex pin to shipreport's
-    // own reusable workflow inside examples/ would re-introduce that
-    // hazard. Outside operators are expected to substitute, but the
-    // checked-in examples themselves should stay sentinel-pinned.
+    // confusing "ref not found" error. Any 40-hex pin to the reusable
+    // workflow inside examples/ would re-introduce that hazard.
+    // Outside operators are expected to substitute, but the checked-in
+    // examples themselves must stay sentinel-pinned. Match by path
+    // suffix so this test is org-agnostic — a recipient who forks this
+    // code under their own GitHub owner doesn't need to edit the test.
     const examples = await loadWorkflows(path.join(ROOT, "examples", "github-actions"));
     const offenders: string[] = [];
     for (const { file, doc } of examples) {
       const raw = (doc as { jobs?: Record<string, { uses?: string }> }).jobs ?? {};
       for (const [, job] of Object.entries(raw)) {
         if (typeof job.uses !== "string") continue;
-        if (!job.uses.includes("tomtom215/shipreport/")) continue;
+        if (!/\/\.github\/workflows\/reusable-shipreport\.yml@/.test(job.uses)) continue;
         if (/@[a-f0-9]{40}\b/.test(job.uses)) {
           offenders.push(`${path.relative(ROOT, file)}: ${job.uses}`);
         }

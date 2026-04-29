@@ -6,6 +6,60 @@ All notable changes are recorded here. Format: [Keep a Changelog
 
 ## [Unreleased]
 
+### Pass 8 — clean-handover preparation
+
+Prepares the repo for delivery as a static archive (ZIP / tarball) to a
+new owner who has no upstream support channel and may deploy
+air-gapped. No public CLI behaviour changed; this pass is about making
+the project self-contained, generic, and survivable on its own.
+
+- **HANDOFF.md** at the repo root is the recipient's first read. Walks
+  from "I just unpacked the archive" through Node + pnpm install,
+  build, smoke test, config, first run, and air-gapped deployment.
+  README.md now opens with a callout pointing at it.
+- **scripts/preflight.mjs** — makes zero network calls, scans the
+  unpacked tree for any leftover personal-handle markers, and verifies
+  every prerequisite (Node version, package.json shape, source layout,
+  built `dist/`, populated `node_modules/`). Safe to run on an
+  air-gapped host.
+- **scripts/setup.sh** — one-shot bootstrap (Node check + corepack
+  pnpm + `pnpm install --frozen-lockfile` + `pnpm build` + preflight).
+- **De-personalisation**:
+  - `LICENSE` copyright holder genericised.
+  - `SECURITY.md` rewritten as an owner-customisable template with
+    `EDIT:` markers for the new owner's vulnerability-report channel
+    and SLA.
+  - `.github/CODEOWNERS` uses a `@YOUR-GITHUB-OWNER` placeholder.
+  - `package.json` `repository` field removed (no false GitHub URL).
+  - All `tomtom215/shipreport` references in docs, examples, and
+    workflow callers replaced with `YOUR-GITHUB-OWNER/YOUR-FORK`.
+  - Test fixture orgs / repos genericised (`example-org/example-repo`).
+  - Sample-output files rename `tomtom215` developer login to `alice`;
+    PR links rewritten to `https://example.com/...`. Filename
+    `tomtom215-2026Q2.md` renamed to `alice-2026Q2.md`.
+  - `tests/e2e/workflows.test.ts` regexes match the reusable-workflow
+    path (`/.github/workflows/reusable-shipreport.yml@`) instead of a
+    specific GitHub owner — survives the recipient's fork rename.
+- **Air-gapped operability**: the runtime never reaches outside the
+  recipient's GitHub instance. HANDOFF.md documents three offline-
+  install paths (vendored `node_modules` tarball, internal npm
+  registry, Docker mirror).
+- **Workflow-specific caveats** added to `.github/workflows/release.yml`
+  and `.github/workflows/audit-export.yml` so a recipient who pushes
+  the code to GitHub knows which workflows need adapting and which
+  work as-is.
+- **Dockerfile** OCI `image.source` label switched to a placeholder
+  the recipient can override.
+- **README + CONTRIBUTING + docs/00** rewritten to acknowledge the
+  recipient as the new owner and to recommend local-CLI as the
+  primary path; GitHub Actions stays first-class but is no longer the
+  "primary supported" deployment.
+
+Verification: `pnpm typecheck`, `pnpm lint`, `pnpm test:coverage`
+(31 files / 331 tests / coverage gates met) and `pnpm audit --prod
+--audit-level=high` all pass. `node scripts/preflight.mjs` reports
+clean.
+
 ### Pre-handoff audit (Pass 7)
 
 A line-by-line audit of every doc, example, and code path turned up the

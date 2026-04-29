@@ -7,7 +7,7 @@
 # │  GitHub will reject the workflow on the first run if you leave    │
 # │  them in. Use a release tag (e.g. `v0.2.0`) or a 40-hex commit   │
 # │  SHA. Latest tags:                                                │
-# │     https://github.com/tomtom215/shipreport/releases             │
+# │     https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/releases             │
 # │  Both the `uses:` ref AND the `shipreport_ref:` input must be set │
 # │  to the same value. Do NOT ship `@main` to production — see      │
 # │  docs/14-security.md.                                            │
@@ -39,7 +39,7 @@ permissions:
 jobs:
   tick:
     # REPLACE: pin to the latest release tag or commit SHA.
-    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@REPLACE_WITH_TAG_OR_SHA
+    uses: YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml@REPLACE_WITH_TAG_OR_SHA
     with:
       config: shipreport.yaml
       mode: tick

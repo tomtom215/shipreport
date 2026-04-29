@@ -22,7 +22,7 @@ secrets, scheduling, OIDC, and audit-artifact retention are already there.
 | Built-in tick template (operator forks the repo)        | Easiest first deploy if you don't mind a fork                | [`.github/workflows/tick.yml`](../.github/workflows/tick.yml)                            |
 
 The reusable workflow is the **recommended pattern**. Each example caller
-delegates to `tomtom215/shipreport/.github/workflows/reusable-shipreport.yml`
+delegates to `YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml`
 at a pinned ref (release tag or 40-hex commit SHA — see the example files
 for the exact form, and the "Pinning vs floating" section below).
 
@@ -51,7 +51,7 @@ And these secrets:
 What the workflow does, in order:
 
 1. Checks out the caller's repo (for `shipreport.yaml`).
-2. Checks out `tomtom215/shipreport` at `shipreport_ref`.
+2. Checks out `YOUR-GITHUB-OWNER/YOUR-FORK` at `shipreport_ref`.
 3. `pnpm install --frozen-lockfile && pnpm build` on shipreport.
 4. Restores the cached state DB (per-caller-repo, per-branch keys).
 5. Runs `shipreport doctor` as a preflight (cheap; fails fast on auth issues).
@@ -68,7 +68,7 @@ run if you forget to substitute, which is the safe failure mode.
 For real deployments, **pin to a tag** (or a 40-hex SHA):
 
 ```yaml
-uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@v0.2.0
+uses: YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml@v0.2.0
 with:
   shipreport_ref: v0.2.0   # same value as the @ above
 ```

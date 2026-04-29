@@ -121,7 +121,7 @@ New `defaults.*` fields need a Zod default and a unit test.
 
 ## Where do I file a bug?
 
-`https://github.com/tomtom215/shipreport/issues`. Include:
+`https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/issues`. Include:
 
 * `shipreport doctor` output (redact tokens — there shouldn't be any in
   the output, but double-check).

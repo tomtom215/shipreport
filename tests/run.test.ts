@@ -19,7 +19,7 @@ import type { RawPR } from "../src/types.js";
 
 // Minimal valid RawPR.
 const rawPR = (over: Partial<RawPR>): RawPR => ({
-  repo: "tomtom215/shipreport",
+  repo: "example-org/example-repo",
   number: 1,
   url: "https://example/1",
   title: "feat: x",
@@ -66,7 +66,7 @@ describe("runTeam — dry-run UX", () => {
     const cache = await Cache.open(path.join(dir, "cache.sqlite"), 7);
     const quarter = quarterLabelToRange("2026Q2", "UTC");
     new ExtractCache(cache).save(
-      "tomtom215/shipreport",
+      "example-org/example-repo",
       quarter,
       [rawPR({ author: "alice" }), rawPR({ number: 2, author: "alice" })],
       "2026-04-12T12:00:00Z",
@@ -75,13 +75,13 @@ describe("runTeam — dry-run UX", () => {
 
     const cfg = normalize({
       github: {},
-      org: "tomtom215",
+      org: "example-org",
       teams: [
         {
           name: "t",
           manager: "alice",
           members: ["alice"],
-          repos: ["tomtom215/shipreport"],
+          repos: ["example-org/example-repo"],
         },
       ],
       defaults: {

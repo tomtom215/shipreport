@@ -1,24 +1,31 @@
-# Code-ownership map. Reviewers in the listed groups are auto-requested
-# on PRs touching matching paths. The entries here are deliberately
-# conservative — every change to the audit log or release pipeline should
-# be reviewed by the project owner.
-
-# Catch-all
-*                               @tomtom215
-
+# Code-ownership map.
+#
+# Edit these lines to point at the GitHub team(s) or user(s) you want
+# auto-requested as reviewers on PRs touching matching paths. The
+# placeholders below (@YOUR-GITHUB-OWNER) are NOT real GitHub handles —
+# replace every occurrence before pushing this repository to GitHub, or
+# delete this file entirely if you don't use GitHub PR-based code review.
+#
 # Compliance-critical paths get an explicit, narrower ownership clause
 # so a maintainer cannot accidentally self-approve a chain-logic change
-# without an outside reviewer.
-/src/audit.ts                   @tomtom215
-/src/audit-export.ts            @tomtom215
-/src/sign.ts                    @tomtom215
-/tests/audit*.test.ts           @tomtom215
-/SECURITY.md                    @tomtom215
+# without an outside reviewer. If you have a separate
+# security/compliance team, point those lines at that team
+# (e.g. @your-org/security).
 
-# Release pipeline
-/.github/workflows/release.yml  @tomtom215
-/docker/Dockerfile              @tomtom215
+# Catch-all
+*                               @YOUR-GITHUB-OWNER
+
+# SOC2 evidence path
+/src/audit.ts                   @YOUR-GITHUB-OWNER
+/src/audit-export.ts            @YOUR-GITHUB-OWNER
+/src/sign.ts                    @YOUR-GITHUB-OWNER
+/tests/audit*.test.ts           @YOUR-GITHUB-OWNER
+/SECURITY.md                    @YOUR-GITHUB-OWNER
+
+# Release pipeline (only relevant if you publish images / packages)
+/.github/workflows/release.yml  @YOUR-GITHUB-OWNER
+/docker/Dockerfile              @YOUR-GITHUB-OWNER
 
 # Operator-facing docs
-/docs/                          @tomtom215
-/examples/                      @tomtom215
+/docs/                          @YOUR-GITHUB-OWNER
+/examples/                      @YOUR-GITHUB-OWNER

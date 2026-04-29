@@ -1,5 +1,11 @@
 # shipreport
 
+> **Just unpacked this archive?** Read **[`HANDOFF.md`](./HANDOFF.md)**
+> first — it walks you from "I have a directory of files" to a working
+> first run, with every prerequisite, every command, and every common
+> failure mode. The rest of this README is the design pitch and
+> reference material; HANDOFF.md is the operations manual.
+
 Draft quarterly success stories from GitHub data — one developer per page, one
 rollup per team, zero prose about people you haven't already lived with. Point
 shipreport at an org, declare your teams and their schedules, and it stitches
@@ -34,17 +40,31 @@ Start at [`docs/02-quickstart.md`](./docs/02-quickstart.md) for a
 
 ## Quick start
 
-```bash
-pnpm add -g shipreport            # or: npx shipreport
+> **First time? You probably want [`HANDOFF.md`](./HANDOFF.md).** That
+> document walks an operator from "I just unzipped this" to a working
+> first run, with every prerequisite, every command, and every common
+> failure mode covered. The rest of this README is the design pitch
+> and reference material; HANDOFF.md is the operations manual.
 
+The core commands once shipreport is built (`pnpm install && pnpm build`):
+
+```bash
 # PAT (simplest for small orgs)
 export SHIPREPORT_GITHUB_TOKEN=ghp_...
-shipreport run --config shipreport.yaml --all
+node bin/shipreport.js run --config shipreport.yaml --all
 
 # GitHub App (recommended for enterprise; see examples/shipreport.yaml)
 export SHIPREPORT_APP_PRIVATE_KEY="$(cat app.pem)"
-shipreport run --config shipreport.yaml --team checkout
+node bin/shipreport.js run --config shipreport.yaml --team checkout
 ```
+
+shipreport is delivered as source. There is no `pnpm add -g shipreport`
+or `npx shipreport` step — the package is not published to the public
+npm registry. After `pnpm build`, the working binary is
+`./bin/shipreport.js` (or `node bin/shipreport.js` on systems where the
+shebang isn't honoured). Add `./bin` to your `$PATH`, symlink
+`bin/shipreport.js` into `/usr/local/bin`, or invoke it directly — your
+call.
 
 Outputs land in `./out/` as Markdown + HTML (+ optional PDF / PNG):
 

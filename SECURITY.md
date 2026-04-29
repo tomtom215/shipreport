@@ -1,39 +1,46 @@
 # Security Policy
 
+This file is **owner-customizable** — you (the operator who received
+this code) should set the contact details below to match your team's
+incident-response process before relying on shipreport in production.
+Search for `EDIT:` markers and replace each one.
+
 ## Reporting a vulnerability
 
-**Do not open a public GitHub issue for security findings.** Use one of:
+Do **not** open a public issue for security findings. Use one of:
 
-1. **Private vulnerability report** via GitHub:
-   <https://github.com/tomtom215/shipreport/security/advisories/new>
-   This is the preferred channel; it routes directly to the maintainers
-   without becoming public.
+1. **EDIT — preferred private channel.** Examples: a GitHub security
+   advisory if you've forked this code into a GitHub repository
+   (`https://github.com/<your-org>/<your-fork>/security/advisories/new`),
+   a private email alias (`security@your-domain`), or a ticketing
+   queue your security team owns.
 
-2. **Email**: `security@` the maintainer's contact domain (see the GitHub
-   profile of `@tomtom215` for the current address). Include `[shipreport]`
-   in the subject.
+2. **EDIT — fallback channel.** A second mechanism in case the first
+   is unreachable.
 
 Please include:
 
 - A description of the issue and its impact.
-- A minimal reproduction (config snippet, exact CLI invocation, expected
-  vs. observed behaviour).
+- A minimal reproduction (config snippet, exact CLI invocation,
+  expected vs. observed behaviour).
 - The output of `node --version` and `pnpm --version`.
-- The shipreport version (`shipreport --version` or the `package.json`
-  field).
+- The shipreport version (`node bin/shipreport.js --version` or the
+  `version` field of `package.json`).
 - If the issue concerns the audit log or signing path: a copy of the
   affected `audit_log` rows (with secrets redacted) and the
   `audit verify` output.
 
-We aim to acknowledge reports within **3 business days** and to issue a
-fix or coordinated-disclosure timeline within **14 calendar days** for
-high/critical issues, **30 calendar days** for lower severity.
+EDIT — your team's acknowledgement and remediation SLAs go here.
+A reasonable starting point:
+
+> We aim to acknowledge reports within 3 business days and to issue a
+> fix or coordinated-disclosure timeline within 14 calendar days for
+> high/critical issues, 30 calendar days for lower severity.
 
 ## Supported versions
 
-shipreport follows [semantic versioning](https://semver.org/). Security
-patches land on the latest minor of the latest major. Older minors are
-not back-ported unless an enterprise sponsor requests it.
+shipreport follows [semantic versioning](https://semver.org/). Decide
+on your own back-port window — a common starting point:
 
 | Version           | Status                                       |
 | ----------------- | -------------------------------------------- |
@@ -41,8 +48,8 @@ not back-ported unless an enterprise sponsor requests it.
 | 0.1.x             | Best-effort only.                            |
 | < 0.1             | Unsupported.                                 |
 
-Pin to a specific minor in production (`shipreport@0.2`) so a security
-patch lands as a patch-level bump, not a surprise minor.
+Pin to a specific minor in production so a security patch lands as a
+patch-level bump, not a surprise minor.
 
 ## Threat model
 
@@ -67,10 +74,9 @@ Out of scope:
 
 ## Coordinated disclosure
 
-If you'd like a CVE assigned, request one in the private advisory
-discussion. We'll publish a GitHub Security Advisory at the time of the
-fix release; the advisory text will include credit (with the reporter's
-permission) and the fixed-in version.
+If you'd like a CVE assigned, request one through your private channel
+above. EDIT — describe how you'll coordinate disclosure (your security
+team, a national CERT, MITRE direct, etc.).
 
 ## Cryptographic primitives
 

@@ -16,14 +16,14 @@
 # (`sha256:0000…0000`) is intentionally invalid: a stale-by-mistake commit
 # will fail at `cosign verify` rather than silently running the wrong
 # image. Resolve a fresh digest with:
-#   crane digest ghcr.io/tomtom215/shipreport:v0.2.0
+#   crane digest ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0
 #   # OR
-#   docker buildx imagetools inspect ghcr.io/tomtom215/shipreport:v0.2.0 \
+#   docker buildx imagetools inspect ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0 \
 #     | grep '^Digest:'
 #
 # Verify the signature locally before pinning:
-#   cosign verify ghcr.io/tomtom215/shipreport:v0.2.0 \
-#     --certificate-identity-regexp 'https://github.com/tomtom215/shipreport/.+' \
+#   cosign verify ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0 \
+#     --certificate-identity-regexp 'https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/.+' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 #
 # Third-party action `uses:` lines below are pinned to 40-hex commit SHAs
@@ -61,7 +61,7 @@ jobs:
       # REPLACE: digest pinning is the entire point of this pattern.
       # The `tag@digest` form ensures docker run pulls EXACTLY this
       # image even if the tag is later moved.
-      SHIPREPORT_IMAGE: ghcr.io/tomtom215/shipreport:v0.2.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      SHIPREPORT_IMAGE: ghcr.io/YOUR-GITHUB-OWNER/YOUR-FORK:v0.2.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -81,7 +81,7 @@ jobs:
       - name: Verify image signature (Sigstore keyless)
         run: |
           cosign verify "${SHIPREPORT_IMAGE}" \
-            --certificate-identity-regexp 'https://github.com/tomtom215/shipreport/.+' \
+            --certificate-identity-regexp 'https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/.+' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
       - name: Pull image

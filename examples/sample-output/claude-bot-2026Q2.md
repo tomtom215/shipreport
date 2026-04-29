@@ -1,6 +1,6 @@
 # claude-bot — 2026Q2 Success Story
 
-**Manager:** tomtom215  ·  **Period:** 2026-04-01 → 2026-06-30
+**Manager:** alice  ·  **Period:** 2026-04-01 → 2026-06-30
 
 ## Headline
 
@@ -18,22 +18,22 @@ Delivered 3 merged PRs across 1 repo.
 
 ### refactor(extract): concurrency pool + incremental cache
 
-- Repo: `tomtom215/shipreport` · PR [#12](https://github.com/tomtom215/shipreport/pull/12) · merged 2026-04-18
-- Reviewers: tomtom215
+- Repo: `example-org/example-repo` · PR [#12](https://example.com/example-org/example-repo/pull/12) · merged 2026-04-18
+- Reviewers: alice
 - Linked issues: —
 - Why it mattered: _Split per-repo fetch into a bounded pool; cache snapshots keyed by (repo, quarter, tz)._
 
 ### Revert "feat(extract): timezone-aware quarter boundaries" (#10)
 
-- Repo: `tomtom215/shipreport` · PR [#13](https://github.com/tomtom215/shipreport/pull/13) · merged 2026-04-20
-- Reviewers: tomtom215
+- Repo: `example-org/example-repo` · PR [#13](https://example.com/example-org/example-repo/pull/13) · merged 2026-04-20
+- Reviewers: alice
 - Linked issues: —
 - Why it mattered: _Regression in Pacific/Auckland. Reverts #10._
 
 ### chore(ci): no-op tick workflow without shipreport.yaml
 
-- Repo: `tomtom215/shipreport` · PR [#15](https://github.com/tomtom215/shipreport/pull/15) · merged 2026-04-23
-- Reviewers: tomtom215
+- Repo: `example-org/example-repo` · PR [#15](https://example.com/example-org/example-repo/pull/15) · merged 2026-04-23
+- Reviewers: alice
 - Linked issues: —
 - Why it mattered: _(manager: add a sentence here)_
 

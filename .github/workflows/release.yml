@@ -8,6 +8,16 @@ name: release
 #
 # Pre-publish gates: full test matrix (typecheck/lint/test/build) and a
 # fresh pnpm audit. Nothing ships until those pass.
+#
+# WILL-NOT-WORK-AS-IS for a recipient who unpacked this from an archive.
+# This workflow assumes:
+#   * `package.json#name` is `shipreport` and you're the npm-registry
+#     owner of that name (you are not).
+#   * `secrets.NPM_TOKEN` exists in your GitHub repo and is valid.
+#   * GHCR credentials work for the repository `${GITHUB_REPOSITORY}`.
+# Either rename the npm package (e.g. `@your-scope/shipreport`) and
+# repoint the publish target, or delete this file. The CI gates in
+# `ci.yml` are still useful and don't depend on any of the above.
 
 on:
   push:

@@ -101,7 +101,7 @@ trigger never costs you a quarterly run.
 > shipreport release tag (`v0.2.0`) or a 40-hex commit SHA before
 > committing. They are not real refs; GitHub will reject the workflow on
 > the first run if you leave them in. Latest tags:
-> <https://github.com/tomtom215/shipreport/releases>.
+> <https://github.com/YOUR-GITHUB-OWNER/YOUR-FORK/releases>.
 
 ```yaml
 name: shipreport
@@ -122,7 +122,7 @@ permissions:
 jobs:
   shipreport:
     # Same value here AND in `shipreport_ref:`. See examples/github-actions/.
-    uses: tomtom215/shipreport/.github/workflows/reusable-shipreport.yml@REPLACE_WITH_TAG_OR_SHA
+    uses: YOUR-GITHUB-OWNER/YOUR-FORK/.github/workflows/reusable-shipreport.yml@REPLACE_WITH_TAG_OR_SHA
     with:
       config: shipreport.yaml
       # Scheduled runs use `tick` (idempotent); manual dispatches use the

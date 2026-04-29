@@ -13,7 +13,11 @@ name: shipreport-audit-export
 # the latest chain head.
 #
 # Skipped cleanly when no shipreport.yaml is present at the repo root —
-# the upstream mirror's runs stay green without operator config.
+# safe to keep enabled even if you never push a config.
+#
+# Only relevant if you push this code to a GitHub repository AND want the
+# scheduler running there. For local-CLI / Docker / systemd deployments,
+# replicate this behaviour with a cron entry (`docs/11-deployment-local-cron.md`).
 
 on:
   schedule:
